@@ -1,11 +1,13 @@
+import json
+from datetime import datetime
+
 import streamlit as st
 from groq import Groq
-from datetime import datetime
 
 # ============================================================
 # TREATS AI ASSISTANT
 # ============================================================
-# Version: 1.0.1
+# Version: 1.1.0
 # Platform: Streamlit
 # AI Provider: Groq
 # ============================================================
@@ -24,14 +26,16 @@ st.set_page_config(
 # APPLICATION CONSTANTS
 # ============================================================
 APP_NAME = "Treats"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.1.0"
 
 DEFAULT_MODEL = "openai/gpt-oss-20b"
 AVAILABLE_MODELS = [
     "openai/gpt-oss-20b",
     "openai/gpt-oss-120b",
 ]
-MAX_HISTORY_MESSAGES = 40
+DEFAULT_TEMPERATURE = 0.7
+MAX_CONTEXT_TOKENS = 6000
+REQUEST_TIMEOUT = 60  # seconds
 
 SYSTEM_PROMPT = """
 You are Treats, a helpful, intelligent, friendly, and reliable AI assistant.
@@ -85,13 +89,22 @@ STARTER_PROMPTS = [
     },
 ]
 
+
 # ============================================================
-# CUSTOM CSS (theme is set in .streamlit/config.toml)
+# CUSTOM EXCEPTION
+# ============================================================
+class TreatsError(Exception):
+    """User-facing error raised when generation fails.
+    These errors are NOT stored in the conversation history."""
+    pass
+
+
+# ============================================================
+# CUSTOM CSS
 # ============================================================
 st.markdown(
     """
     <style>
-    /* Header */
     .treats-header {
         padding: 12px 0 20px 0;
         border-bottom: 1px solid #eeeeee;
@@ -108,25 +121,20 @@ st.markdown(
         font-size: 14px;
         margin-top: 3px;
     }
-    /* Sidebar */
     section[data-testid="stSidebar"] {
         border-right: 1px solid #eeeeee;
     }
-    /* Buttons */
     .stButton > button {
         border-radius: 10px;
         font-weight: 600;
     }
-    /* Chat input */
     div[data-testid="stChatInput"] {
         border-radius: 14px;
     }
-    /* Small status text */
     .status-text {
         color: #777777;
         font-size: 13px;
     }
-    /* Welcome screen */
     .welcome-box {
         padding: 50px 20px;
         text-align: center;
@@ -148,39 +156,47 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
 # ============================================================
-# API KEY / CLIENT
+# GROQ CLIENT (cached across reruns)
 # ============================================================
-def get_api_key():
-    """Load the Groq API key from Streamlit Secrets."""
+@st.cache_resource(show_spinner=False)
+def get_client():
+    """Return a cached Groq client, or None if no key is configured."""
     try:
         key = st.secrets.get("GROQ_API_KEY", "")
-        if key and key.strip():
-            return key.strip()
     except Exception:
-        pass
-    return None
-
-
-def get_client():
-    """Create and return a Groq client, or None if not configured."""
-    api_key = get_api_key()
-    if not api_key:
+        return None
+    if not key or not key.strip():
         return None
     try:
-        return Groq(api_key=api_key)
+        return Groq(api_key=key.strip())
     except Exception:
         return None
+
+
+def has_api_key() -> bool:
+    """Check whether GROQ_API_KEY is configured."""
+    try:
+        key = st.secrets.get("GROQ_API_KEY", "")
+        return bool(key and key.strip())
+    except Exception:
+        return False
 
 
 # ============================================================
 # SESSION STATE
 # ============================================================
 def initialize_session():
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-    if "model" not in st.session_state:
-        st.session_state.model = DEFAULT_MODEL
+    defaults = {
+        "messages": [],
+        "model": DEFAULT_MODEL,
+        "temperature": DEFAULT_TEMPERATURE,
+        "pending": False,   # True when we need to generate a reply
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
 
 initialize_session()
@@ -189,17 +205,25 @@ initialize_session()
 # ============================================================
 # HELPERS
 # ============================================================
-def clear_conversation():
-    st.session_state.messages = []
+def estimate_tokens(text: str) -> int:
+    """Rough token estimate: ~4 characters per token."""
+    return max(1, len(text or "") // 4)
 
 
-def trim_history(messages):
-    """Prevent the history from growing indefinitely.
-    Future versions: replace with summarization / vector memory.
-    """
-    if len(messages) <= MAX_HISTORY_MESSAGES:
-        return messages
-    return messages[-MAX_HISTORY_MESSAGES:]
+def trim_history(messages, max_tokens=MAX_CONTEXT_TOKENS):
+    """Keep the most recent messages within a token budget,
+    ensuring the result starts with a user message."""
+    total = 0
+    kept = []
+    for msg in reversed(messages):
+        tokens = estimate_tokens(msg.get("content", ""))
+        if total + tokens > max_tokens:
+            break
+        kept.insert(0, msg)
+        total += tokens
+    while kept and kept[0].get("role") != "user":
+        kept.pop(0)
+    return kept
 
 
 def build_messages():
@@ -208,62 +232,91 @@ def build_messages():
     return conversation
 
 
-def generate_response(user_message: str) -> str:
-    """Send the conversation to Groq and return the assistant reply."""
+def format_error(error: Exception) -> str:
+    text = str(error).lower()
+    if "rate_limit" in text or "429" in text:
+        return ("Treats has temporarily reached the API rate limit. "
+                "Please wait a moment and try again.")
+    if "authentication" in text or "api key" in text or "401" in text:
+        return ("Treats could not authenticate with the AI service. "
+                "Please check the Groq API key in Streamlit Secrets.")
+    if "timeout" in text or "timed out" in text:
+        return "The request took too long. Please try again."
+    if "model" in text and ("not found" in text or "unavailable" in text):
+        return ("The selected AI model is currently unavailable. "
+                "Please choose a different model.")
+    return f"Treats encountered an unexpected error: {error}"
+
+
+def stream_assistant_reply():
+    """Generator that yields text chunks from Groq.
+    Raises TreatsError on failure."""
     client = get_client()
     if client is None:
-        return (
-            "Treats is not connected to the AI service yet.\n\n"
-            "Please configure the `GROQ_API_KEY` secret in "
-            "Streamlit before starting the conversation."
+        raise TreatsError(
+            "Treats is not connected to the AI service yet. "
+            "Please configure the GROQ_API_KEY secret in Streamlit."
         )
 
     conversation = build_messages()
-
     try:
-        completion = client.chat.completions.create(
+        stream = client.chat.completions.create(
             model=st.session_state.model,
             messages=conversation,
-            temperature=0.7,
+            temperature=st.session_state.temperature,
             max_completion_tokens=4096,
+            stream=True,
+            timeout=REQUEST_TIMEOUT,
         )
-        response = completion.choices[0].message.content
-        if not response:
-            return "I couldn't generate a response. Please try again."
-        return response
-
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            content = getattr(delta, "content", None)
+            if content:
+                yield content
     except Exception as error:
-        error_message = str(error).lower()
-        if "rate_limit" in error_message:
-            return (
-                "Treats has temporarily reached the API rate limit. "
-                "Please wait a moment and try again."
-            )
-        if "authentication" in error_message or "api key" in error_message:
-            return (
-                "Treats could not authenticate with the AI service. "
-                "Please check the Groq API key in Streamlit Secrets."
-            )
-        if "model" in error_message:
-            return (
-                "The selected AI model is currently unavailable. "
-                "Please check the configured model."
-            )
-        return (
-            "Treats encountered an unexpected error while generating "
-            f"the response.\n\nTechnical details: {error}"
-        )
+        raise TreatsError(format_error(error)) from error
 
 
-def format_timestamp() -> str:
-    return datetime.now().strftime("%H:%M")
+def clear_conversation():
+    st.session_state.messages = []
+    st.session_state.pending = False
 
 
-def send_message(prompt: str) -> None:
-    """Append user message, generate reply, append it."""
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    reply = generate_response(prompt)
-    st.session_state.messages.append({"role": "assistant", "content": reply})
+def regenerate_last():
+    """Remove the last assistant message so it can be regenerated."""
+    if (st.session_state.messages
+            and st.session_state.messages[-1]["role"] == "assistant"):
+        st.session_state.messages.pop()
+
+
+def export_markdown() -> str:
+    lines = [
+        f"# {APP_NAME} — Conversation",
+        f"_Exported: {datetime.now().strftime('%Y-%m-%d %H:%M')}_",
+        f"_Model: {st.session_state.model}_",
+        f"_Temperature: {st.session_state.temperature}_",
+        "",
+    ]
+    for msg in st.session_state.messages:
+        role = "You" if msg["role"] == "user" else APP_NAME
+        lines.append(f"### {role}")
+        lines.append(msg.get("content", ""))
+        lines.append("")
+    return "\n".join(lines)
+
+
+def export_json() -> str:
+    payload = {
+        "app": APP_NAME,
+        "version": APP_VERSION,
+        "exported_at": datetime.now().isoformat(),
+        "model": st.session_state.model,
+        "temperature": st.session_state.temperature,
+        "messages": st.session_state.messages,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 # ============================================================
@@ -288,10 +341,19 @@ with st.sidebar:
     st.divider()
     st.markdown("### Settings")
 
-    st.session_state.model = st.selectbox(
+    st.selectbox(
         "AI Model",
         options=AVAILABLE_MODELS,
-        index=AVAILABLE_MODELS.index(st.session_state.model),
+        key="model",
+    )
+
+    st.slider(
+        "Temperature",
+        min_value=0.0,
+        max_value=1.5,
+        step=0.05,
+        key="temperature",
+        help="Lower = focused and deterministic. Higher = creative.",
     )
 
     st.divider()
@@ -309,26 +371,41 @@ with st.sidebar:
             unsafe_allow_html=True,
         )
 
+    # Export buttons — only shown when there is something to export
+    if st.session_state.messages:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.download_button(
+                "⬇ MD",
+                data=export_markdown(),
+                file_name=f"treats_{stamp}.md",
+                mime="text/markdown",
+                use_container_width=True,
+            )
+        with c2:
+            st.download_button(
+                "⬇ JSON",
+                data=export_json(),
+                file_name=f"treats_{stamp}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+
     st.divider()
     st.markdown("### About")
     st.markdown(
         f"""
-        **{APP_NAME}**  
-        Version {APP_VERSION}  
+        **{APP_NAME}**
+        Version {APP_VERSION}
         A general-purpose AI assistant built with:
         - Python
         - Streamlit
         - Groq
         - GitHub
-
-        Designed for future expansion.
         """
     )
 
-    st.divider()
-    if st.button("Clear conversation", use_container_width=True):
-        clear_conversation()
-        st.rerun()
 
 # ============================================================
 # MAIN HEADER
@@ -346,14 +423,14 @@ st.markdown(
 # ============================================================
 # API STATUS
 # ============================================================
-if not get_api_key():
+if not has_api_key():
     st.warning(
         "Treats is running, but the Groq API key has not been "
         "configured in Streamlit Secrets."
     )
 
 # ============================================================
-# WELCOME SCREEN (only when there are no messages)
+# WELCOME SCREEN
 # ============================================================
 if not st.session_state.messages:
     st.markdown(
@@ -371,19 +448,11 @@ if not st.session_state.messages:
     for col, starter in zip(cols, STARTER_PROMPTS):
         with col:
             if st.button(starter["label"], use_container_width=True):
-                send_message(starter["prompt"])
+                st.session_state.messages.append(
+                    {"role": "user", "content": starter["prompt"]}
+                )
+                st.session_state.pending = True
                 st.rerun()
-
-# ============================================================
-# DISPLAY CHAT HISTORY
-# ============================================================
-for message in st.session_state.messages:
-    role = message.get("role")
-    content = message.get("content", "")
-    if role not in ["user", "assistant"]:
-        continue
-    with st.chat_message(role):
-        st.markdown(content)
 
 # ============================================================
 # CHAT INPUT
@@ -392,8 +461,62 @@ prompt = st.chat_input("Message Treats...")
 if prompt:
     prompt = prompt.strip()
     if prompt:
-        send_message(prompt)
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.pending = True
         st.rerun()
+
+# ============================================================
+# DISPLAY CHAT HISTORY
+# ============================================================
+for i, message in enumerate(st.session_state.messages):
+    role = message.get("role")
+    content = message.get("content", "")
+    if role not in ["user", "assistant"]:
+        continue
+
+    with st.chat_message(role):
+        st.markdown(content)
+
+        # Action buttons for assistant messages
+        if role == "assistant":
+            is_last = (i == len(st.session_state.messages) - 1)
+            actions = st.columns([1, 1, 6])
+
+            with actions[0]:
+                with st.popover("📋", help="Copy message"):
+                    st.code(content, language=None)
+
+            if is_last:
+                with actions[1]:
+                    if st.button("🔄", key=f"regen_{i}",
+                                 help="Regenerate response"):
+                        regenerate_last()
+                        st.session_state.pending = True
+                        st.rerun()
+
+# ============================================================
+# GENERATE ASSISTANT REPLY (if pending)
+# ============================================================
+if st.session_state.pending:
+    if (not st.session_state.messages
+            or st.session_state.messages[-1]["role"] != "user"):
+        st.session_state.pending = False
+    else:
+        with st.chat_message("assistant"):
+            try:
+                response = st.write_stream(stream_assistant_reply())
+                if response:
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": response}
+                    )
+                    st.session_state.pending = False
+                    st.rerun()
+                else:
+                    st.error("Treats returned an empty response. Please try again.")
+                    st.session_state.pending = False
+            except TreatsError as error:
+                st.error(str(error))
+                st.session_state.pending = False
 
 # ============================================================
 # FOOTER
