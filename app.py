@@ -1,18 +1,20 @@
+import asyncio
 import json
 import secrets as pysecrets
 import string
 from datetime import datetime
 
+import edge_tts
 import streamlit as st
 from groq import Groq
 
 # ============================================================
 # TREATS AI ASSISTANT
 # ============================================================
-# Version: 1.2.0
+# Version: 1.4.0
 # Platform: Streamlit
 # AI Provider: Groq
-# Tools: Chat, CV Generator, Password Generator, Video Script
+# Tools: Chat, CV, Password, Video Script, Text-to-Speech
 # ============================================================
 
 # ============================================================
@@ -29,7 +31,7 @@ st.set_page_config(
 # APPLICATION CONSTANTS
 # ============================================================
 APP_NAME = "Treats"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.4.0"
 
 DEFAULT_MODEL = "openai/gpt-oss-20b"
 AVAILABLE_MODELS = [
@@ -40,18 +42,12 @@ DEFAULT_TEMPERATURE = 0.7
 MAX_CONTEXT_TOKENS = 6000
 REQUEST_TIMEOUT = 60  # seconds
 
-# Free usage limits per tool (ignored for owner)
-FREE_LIMITS = {
-    "cv": 1,
-    "password": 5,
-    "video": 1,
-}
-
 TOOL_CHAT = "💬 Chat"
 TOOL_CV = "📄 CV Generator"
 TOOL_PASSWORD = "🔐 Password Generator"
-TOOL_VIDEO = "🎬 Video Generator"
-ALL_TOOLS = [TOOL_CHAT, TOOL_CV, TOOL_PASSWORD, TOOL_VIDEO]
+TOOL_VIDEO = "🎬 Video Script Generator"
+TOOL_TTS = "🔊 Text to Speech"
+ALL_TOOLS = [TOOL_CHAT, TOOL_CV, TOOL_PASSWORD, TOOL_VIDEO, TOOL_TTS]
 
 SYSTEM_PROMPT = """
 You are Treats, a helpful, intelligent, friendly, and reliable AI assistant.
@@ -104,6 +100,57 @@ STARTER_PROMPTS = [
         ),
     },
 ]
+
+# ------------------------------------------------------------
+# TEXT-TO-SPEECH VOICE CATALOG
+# ------------------------------------------------------------
+VOICE_CATALOG = {
+    "English": [
+        # --- Male voices ---
+        {"id": "en-US-GuyNeural", "name": "Guy", "gender": "Male",
+         "desc": "Deep, confident American — great for narrations"},
+        {"id": "en-US-DavisNeural", "name": "Davis", "gender": "Male",
+         "desc": "Calm, professional — ideal for tutorials"},
+        {"id": "en-US-JasonNeural", "name": "Jason", "gender": "Male",
+         "desc": "Casual, friendly — good for podcasts"},
+        {"id": "en-US-TonyNeural", "name": "Tony", "gender": "Male",
+         "desc": "News anchor — clear and authoritative"},
+        {"id": "en-US-BrandonNeural", "name": "Brandon", "gender": "Male",
+         "desc": "Warm, storytelling — great for audiobooks"},
+        {"id": "en-GB-RyanNeural", "name": "Ryan", "gender": "Male",
+         "desc": "British, refined — elegant and classy"},
+        # --- Female voices ---
+        {"id": "en-US-JennyNeural", "name": "Jenny", "gender": "Female",
+         "desc": "Warm, friendly — natural everyday voice"},
+        {"id": "en-US-AriaNeural", "name": "Aria", "gender": "Female",
+         "desc": "Professional, clear — corporate and clean"},
+        {"id": "en-US-MichelleNeural", "name": "Michelle", "gender": "Female",
+         "desc": "Cheerful, energetic — perfect for ads"},
+        {"id": "en-US-MonicaNeural", "name": "Monica", "gender": "Female",
+         "desc": "Natural conversational — casual and modern"},
+        {"id": "en-US-SaraNeural", "name": "Sara", "gender": "Female",
+         "desc": "Calm, soothing — good for meditation"},
+        {"id": "en-US-AnaNeural", "name": "Ana", "gender": "Female",
+         "desc": "Young, child-like — playful and light"},
+        {"id": "en-GB-SoniaNeural", "name": "Sonia", "gender": "Female",
+         "desc": "British, elegant — polished and formal"},
+        # --- Character-style ---
+        {"id": "en-US-NancyNeural", "name": "Nancy", "gender": "Female",
+         "desc": "Character: wise elder — storytelling tone"},
+        {"id": "en-US-SteffanNeural", "name": "Steffan", "gender": "Male",
+         "desc": "Character: sci-fi narrator — dramatic"},
+    ],
+    "Arabic": [
+        {"id": "ar-EG-ShakirNeural", "name": "Shakir", "gender": "Male",
+         "desc": "صوت مصري رجولي قوي — مناسب للأخبار والروايات"},
+        {"id": "ar-SA-HamedNeural", "name": "Faisal", "gender": "Male",
+         "desc": "صوت سعودي هادئ ورسمي — مثالي للمحتوى المهني"},
+        {"id": "ar-EG-SalmaNeural", "name": "Salma", "gender": "Female",
+         "desc": "صوت مصري دافئ وطبيعي — ودود ومريح"},
+        {"id": "ar-SA-ZariyahNeural", "name": "Zariyah", "gender": "Female",
+         "desc": "صوت سعودي رسمي أنيق — للمحتوى الرسمي"},
+    ],
+}
 
 
 # ============================================================
@@ -167,15 +214,6 @@ st.markdown(
         color: #777777;
         font-size: 16px;
     }
-    .owner-badge {
-        display: inline-block;
-        padding: 4px 10px;
-        background: #FFF3CD;
-        color: #8A6D3B;
-        border-radius: 8px;
-        font-size: 12px;
-        font-weight: 600;
-    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -183,11 +221,10 @@ st.markdown(
 
 
 # ============================================================
-# GROQ CLIENT (cached across reruns)
+# GROQ CLIENT
 # ============================================================
 @st.cache_resource(show_spinner=False)
 def get_client():
-    """Return a cached Groq client, or None if no key is configured."""
     try:
         key = st.secrets.get("GROQ_API_KEY", "")
     except Exception:
@@ -201,7 +238,6 @@ def get_client():
 
 
 def has_api_key() -> bool:
-    """Check whether GROQ_API_KEY is configured."""
     try:
         key = st.secrets.get("GROQ_API_KEY", "")
         return bool(key and key.strip())
@@ -213,36 +249,213 @@ def has_api_key() -> bool:
 # SESSION STATE
 # ============================================================
 def initialize_session():
-    defaults = {
-        "messages": [],
-        "model": DEFAULT_MODEL,
-        "temperature": DEFAULT_TEMPERATURE,
-        "pending": False,
-        "selected_tool": TOOL_CHAT,
-        "is_owner": False,
-        "used_cv": 0,
-        "used_password": 0,
-        "used_video": 0,
-    }
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+    if "conversations" not in st.session_state:
+        st.session_state.conversations = {}
+    if "current_conv_id" not in st.session_state:
+        st.session_state.current_conv_id = None
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    if "model" not in st.session_state:
+        st.session_state.model = DEFAULT_MODEL
+    if "temperature" not in st.session_state:
+        st.session_state.temperature = DEFAULT_TEMPERATURE
+    if "pending" not in st.session_state:
+        st.session_state.pending = False
+    if "selected_tool" not in st.session_state:
+        st.session_state.selected_tool = TOOL_CHAT
+    if "tts_audio" not in st.session_state:
+        st.session_state.tts_audio = None
+    if "tts_voice_name" not in st.session_state:
+        st.session_state.tts_voice_name = ""
+    if "last_import_sig" not in st.session_state:
+        st.session_state.last_import_sig = ""
+
+    # ensure at least one conversation exists
+    if not st.session_state.conversations:
+        cid = datetime.now().strftime("%Y%m%d%H%M%S%f")
+        st.session_state.conversations[cid] = {
+            "title": "New chat",
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "messages": [],
+        }
+        st.session_state.current_conv_id = cid
+        st.session_state.messages = []
+    elif st.session_state.current_conv_id not in st.session_state.conversations:
+        cid = list(st.session_state.conversations.keys())[0]
+        st.session_state.current_conv_id = cid
+        st.session_state.messages = list(
+            st.session_state.conversations[cid]["messages"]
+        )
 
 
 initialize_session()
 
 
 # ============================================================
+# CONVERSATION MANAGEMENT
+# ============================================================
+def _new_conv_id() -> str:
+    return datetime.now().strftime("%Y%m%d%H%M%S%f")
+
+
+def create_conversation(title="New chat") -> str:
+    cid = _new_conv_id()
+    st.session_state.conversations[cid] = {
+        "title": title,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "messages": [],
+    }
+    return cid
+
+
+def _sync_messages_to_conv():
+    """Save current session messages into the active conversation."""
+    cid = st.session_state.get("current_conv_id")
+    if not cid or cid not in st.session_state.conversations:
+        return
+    conv = st.session_state.conversations[cid]
+    conv["messages"] = list(st.session_state.messages)
+    # auto-title from first user message
+    if conv["title"] in ("New chat", "", None):
+        for m in st.session_state.messages:
+            if m.get("role") == "user" and m.get("content", "").strip():
+                title = m["content"].strip().replace("\n", " ")[:40]
+                conv["title"] = title
+                break
+
+
+def switch_conversation(cid: str):
+    if cid not in st.session_state.conversations:
+        return
+    _sync_messages_to_conv()
+    st.session_state.current_conv_id = cid
+    st.session_state.messages = list(
+        st.session_state.conversations[cid]["messages"]
+    )
+    st.session_state.pending = False
+
+
+def add_message(role: str, content: str):
+    st.session_state.messages.append({"role": role, "content": content})
+    _sync_messages_to_conv()
+
+
+def delete_conversation(cid: str):
+    if cid not in st.session_state.conversations:
+        return
+    del st.session_state.conversations[cid]
+    if not st.session_state.conversations:
+        new_cid = create_conversation()
+        st.session_state.current_conv_id = new_cid
+        st.session_state.messages = []
+        return
+    if st.session_state.current_conv_id == cid:
+        new_cid = list(st.session_state.conversations.keys())[0]
+        st.session_state.current_conv_id = new_cid
+        st.session_state.messages = list(
+            st.session_state.conversations[new_cid]["messages"]
+        )
+        st.session_state.pending = False
+
+
+def rename_conversation(cid: str, new_title: str):
+    if cid in st.session_state.conversations:
+        clean = (new_title or "").strip()[:60]
+        st.session_state.conversations[cid]["title"] = clean or "Untitled"
+
+
+def clear_conversation():
+    st.session_state.messages = []
+    st.session_state.pending = False
+    _sync_messages_to_conv()
+
+
+def regenerate_last():
+    if (st.session_state.messages
+            and st.session_state.messages[-1]["role"] == "assistant"):
+        st.session_state.messages.pop()
+        _sync_messages_to_conv()
+
+
+# ============================================================
+# EXPORT / IMPORT
+# ============================================================
+def export_markdown() -> str:
+    cid = st.session_state.current_conv_id
+    title = st.session_state.conversations.get(cid, {}).get("title", "Chat")
+    lines = [
+        f"# {APP_NAME} — {title}",
+        f"_Exported: {datetime.now().strftime('%Y-%m-%d %H:%M')}_",
+        f"_Model: {st.session_state.model}_",
+        f"_Temperature: {st.session_state.temperature}_",
+        "",
+    ]
+    for msg in st.session_state.messages:
+        role = "You" if msg["role"] == "user" else APP_NAME
+        lines.append(f"### {role}")
+        lines.append(msg.get("content", ""))
+        lines.append("")
+    return "\n".join(lines)
+
+
+def export_current_json() -> str:
+    payload = {
+        "app": APP_NAME,
+        "version": APP_VERSION,
+        "exported_at": datetime.now().isoformat(),
+        "title": st.session_state.conversations.get(
+            st.session_state.current_conv_id, {}
+        ).get("title", "Chat"),
+        "model": st.session_state.model,
+        "temperature": st.session_state.temperature,
+        "messages": st.session_state.messages,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def export_all_conversations() -> str:
+    _sync_messages_to_conv()
+    payload = {
+        "app": APP_NAME,
+        "version": APP_VERSION,
+        "exported_at": datetime.now().isoformat(timespec="seconds"),
+        "conversations": st.session_state.conversations,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def import_conversations(data: dict) -> int:
+    convs = data.get("conversations", {})
+    if not isinstance(convs, dict):
+        return 0
+    count = 0
+    for cid, conv in convs.items():
+        if not isinstance(conv, dict):
+            continue
+        new_conv = {
+            "title": str(conv.get("title", "Imported"))[:80],
+            "created_at": str(
+                conv.get("created_at",
+                         datetime.now().isoformat(timespec="seconds"))
+            ),
+            "messages": list(conv.get("messages", [])),
+        }
+        target_id = cid
+        if target_id in st.session_state.conversations:
+            target_id = _new_conv_id()
+        st.session_state.conversations[target_id] = new_conv
+        count += 1
+    return count
+
+
+# ============================================================
 # CHAT HELPERS
 # ============================================================
 def estimate_tokens(text: str) -> int:
-    """Rough token estimate: ~4 characters per token."""
     return max(1, len(text or "") // 4)
 
 
 def trim_history(messages, max_tokens=MAX_CONTEXT_TOKENS):
-    """Keep the most recent messages within a token budget,
-    ensuring the result starts with a user message."""
     total = 0
     kept = []
     for msg in reversed(messages):
@@ -279,15 +492,12 @@ def format_error(error: Exception) -> str:
 
 
 def stream_assistant_reply():
-    """Generator that yields text chunks from Groq.
-    Raises TreatsError on failure."""
     client = get_client()
     if client is None:
         raise TreatsError(
             "Treats is not connected to the AI service yet. "
             "Please configure the GROQ_API_KEY secret in Streamlit."
         )
-
     conversation = build_messages()
     try:
         stream = client.chat.completions.create(
@@ -309,92 +519,25 @@ def stream_assistant_reply():
         raise TreatsError(format_error(error)) from error
 
 
-def clear_conversation():
-    st.session_state.messages = []
-    st.session_state.pending = False
-
-
-def regenerate_last():
-    """Remove the last assistant message so it can be regenerated."""
-    if (st.session_state.messages
-            and st.session_state.messages[-1]["role"] == "assistant"):
-        st.session_state.messages.pop()
-
-
-def export_markdown() -> str:
-    lines = [
-        f"# {APP_NAME} — Conversation",
-        f"_Exported: {datetime.now().strftime('%Y-%m-%d %H:%M')}_",
-        f"_Model: {st.session_state.model}_",
-        f"_Temperature: {st.session_state.temperature}_",
-        "",
-    ]
-    for msg in st.session_state.messages:
-        role = "You" if msg["role"] == "user" else APP_NAME
-        lines.append(f"### {role}")
-        lines.append(msg.get("content", ""))
-        lines.append("")
-    return "\n".join(lines)
-
-
-def export_json() -> str:
-    payload = {
-        "app": APP_NAME,
-        "version": APP_VERSION,
-        "exported_at": datetime.now().isoformat(),
-        "model": st.session_state.model,
-        "temperature": st.session_state.temperature,
-        "messages": st.session_state.messages,
-    }
-    return json.dumps(payload, ensure_ascii=False, indent=2)
-
-
 # ============================================================
-# OWNER ACCESS + USAGE LIMITS
+# TTS ENGINE (edge-tts)
 # ============================================================
-def check_owner_password(password: str) -> bool:
-    """Return True if password matches OWNER_PASSWORD in secrets."""
+def synthesize_speech(text: str, voice_id: str, rate_percent: int) -> bytes:
+    rate_str = f"{rate_percent:+d}%"
+
+    async def _run() -> bytes:
+        communicate = edge_tts.Communicate(text, voice_id, rate=rate_str)
+        audio = b""
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio += chunk["data"]
+        return audio
+
+    loop = asyncio.new_event_loop()
     try:
-        correct = st.secrets.get("OWNER_PASSWORD", "")
-        return bool(correct) and password == correct
-    except Exception:
-        return False
-
-
-def is_owner() -> bool:
-    return st.session_state.get("is_owner", False)
-
-
-def remaining_uses(tool_key: str):
-    """Return remaining free uses, or ∞ for owner."""
-    if is_owner():
-        return "∞"
-    used = st.session_state.get(f"used_{tool_key}", 0)
-    limit = FREE_LIMITS.get(tool_key, 0)
-    return max(0, limit - used)
-
-
-def consume_use(tool_key: str) -> bool:
-    """Try to consume one use of a tool. Return True if allowed."""
-    if is_owner():
-        return True
-    used = st.session_state.get(f"used_{tool_key}", 0)
-    limit = FREE_LIMITS.get(tool_key, 0)
-    if used >= limit:
-        return False
-    st.session_state[f"used_{tool_key}"] = used + 1
-    return True
-
-
-def show_limit_reached(tool_name: str) -> None:
-    st.warning(
-        f"⚠️ You've used all your free **{tool_name}** requests."
-    )
-    st.info(
-        "💡 **To continue:**\n"
-        "- Upgrade to premium (coming soon), or\n"
-        "- Use the **🔑 Owner access** panel in the sidebar."
-    )
+        return loop.run_until_complete(_run())
+    finally:
+        loop.close()
 
 
 # ============================================================
@@ -402,14 +545,7 @@ def show_limit_reached(tool_name: str) -> None:
 # ============================================================
 def render_cv_generator():
     st.markdown("## 📄 CV Generator")
-    st.caption(
-        f"Free uses left: **{remaining_uses('cv')}**"
-        + ("  ·  👑 Owner mode (unlimited)" if is_owner() else "")
-    )
-
-    if remaining_uses("cv") == 0 and not is_owner():
-        show_limit_reached("CV Generator")
-        return
+    st.caption("Generate a professional CV — download as Markdown.")
 
     with st.form("cv_form"):
         col_a, col_b = st.columns(2)
@@ -429,7 +565,7 @@ def render_cv_generator():
                 "Write freely in any language. Example:\n"
                 "I'm a software engineer with 5 years of experience "
                 "in Python and AWS. I worked at Company X for 3 years "
-                "where I led a team of 4. Before that, I worked at..."
+                "where I led a team of 4..."
             ),
         )
 
@@ -457,10 +593,6 @@ def render_cv_generator():
         st.error("AI service not configured.")
         return
 
-    if not consume_use("cv"):
-        show_limit_reached("CV Generator")
-        return
-
     cv_prompt = f"""
     Create a professional CV in {cv_language} based on the information below.
     Tone: {tone}.
@@ -471,14 +603,14 @@ def render_cv_generator():
 
     Output in clean Markdown with these sections:
     # Full Name
-    ## Professional Summary  (2-4 sentences)
-    ## Work Experience  (company, role, dates, 3-5 bullet achievements)
+    ## Professional Summary
+    ## Work Experience
     ## Education
-    ## Skills  (as a comma-separated list)
+    ## Skills
     ## Languages
 
     Rules:
-    - Do NOT invent facts. If a section has no info, either omit it or keep it minimal.
+    - Do NOT invent facts.
     - Convert vague descriptions into concrete bullet points.
     - Use strong action verbs.
     - Keep it ATS-friendly (no tables, no images).
@@ -506,13 +638,25 @@ def render_cv_generator():
     st.divider()
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
-    st.download_button(
-        "⬇ Download CV (Markdown)",
-        data=cv_text,
-        file_name=f"cv_{stamp}.md",
-        mime="text/markdown",
-        use_container_width=True,
-    )
+    col1, col2 = st.columns(2)
+    with col1:
+        st.download_button(
+            "⬇ Download CV (Markdown)",
+            data=cv_text,
+            file_name=f"cv_{stamp}.md",
+            mime="text/markdown",
+            use_container_width=True,
+            key="dl_cv_md",
+        )
+    with col2:
+        st.download_button(
+            "⬇ Download CV (Text)",
+            data=cv_text,
+            file_name=f"cv_{stamp}.txt",
+            mime="text/plain",
+            use_container_width=True,
+            key="dl_cv_txt",
+        )
 
 
 # ============================================================
@@ -520,14 +664,7 @@ def render_cv_generator():
 # ============================================================
 def render_password_generator():
     st.markdown("## 🔐 Password Generator")
-    st.caption(
-        f"Free uses left: **{remaining_uses('password')}**"
-        + ("  ·  👑 Owner mode (unlimited)" if is_owner() else "")
-    )
-
-    if remaining_uses("password") == 0 and not is_owner():
-        show_limit_reached("Password Generator")
-        return
+    st.caption("Create strong, random passwords instantly.")
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -538,10 +675,6 @@ def render_password_generator():
         use_numbers = st.checkbox("Include numbers", value=True)
 
     if st.button("🎲 Generate password", use_container_width=True):
-        if not consume_use("password"):
-            show_limit_reached("Password Generator")
-            return
-
         alphabet = string.ascii_letters
         if use_numbers:
             alphabet += string.digits
@@ -571,20 +704,13 @@ def render_password_generator():
 # ============================================================
 def render_video_generator():
     st.markdown("## 🎬 Video Script Generator")
-    st.caption(
-        f"Free uses left: **{remaining_uses('video')}**"
-        + ("  ·  👑 Owner mode (unlimited)" if is_owner() else "")
-    )
+    st.caption("Generate a complete video script + storyboard.")
 
     st.info(
         "ℹ️ This tool generates a **complete video script + storyboard**. "
         "Rendering the actual video requires an external service "
         "(Runway, Replicate, etc.) — planned for a future version."
     )
-
-    if remaining_uses("video") == 0 and not is_owner():
-        show_limit_reached("Video Script Generator")
-        return
 
     with st.form("video_form"):
         topic = st.text_input(
@@ -628,10 +754,6 @@ def render_video_generator():
         st.error("AI service not configured.")
         return
 
-    if not consume_use("video"):
-        show_limit_reached("Video Script Generator")
-        return
-
     video_prompt = f"""
     Create a complete video script in {language} for a {duration} {style} video
     about: "{topic}". Target platform: {platform}.
@@ -639,21 +761,10 @@ def render_video_generator():
     Structure:
 
     ## 🎯 Hook (first 3 seconds)
-    A strong opening line that grabs attention.
-
-    ## 📝 Script
-    Timestamped speaker lines. Format:
-    [0:00-0:05] Speaker: "..."
-    [0:05-0:15] Speaker: "..."
-
+    ## 📝 Script  (with timestamps)
     ## 🎥 Visual notes (storyboard)
-    For each timestamp, describe what should be on screen.
-
     ## 🎵 Music / tone
-    Suggest background music style and overall vibe.
-
     ## 📢 Call to action
-    A clear CTA appropriate for {platform}.
 
     Be concrete and production-ready. No filler.
     """
@@ -690,6 +801,109 @@ def render_video_generator():
 
 
 # ============================================================
+# TOOL 4: TEXT TO SPEECH
+# ============================================================
+def render_tts():
+    st.markdown("## 🔊 Text to Speech")
+    st.caption(
+        "Convert text into natural speech. Choose voice + speed, "
+        "listen, and download as MP3."
+    )
+
+    language = st.selectbox(
+        "Language",
+        options=list(VOICE_CATALOG.keys()),
+        key="tts_language",
+    )
+    voices = VOICE_CATALOG[language]
+
+    voice_labels = [
+        f"{v['name']}  ·  {v['gender']}  ·  {v['desc']}" for v in voices
+    ]
+    selected_index = st.selectbox(
+        "Voice",
+        options=range(len(voices)),
+        format_func=lambda i: voice_labels[i],
+        key="tts_voice_index",
+    )
+    selected_voice = voices[selected_index]
+
+    col_speed, col_info = st.columns([2, 1])
+    with col_speed:
+        speed = st.slider(
+            "Speed",
+            min_value=0.5,
+            max_value=2.0,
+            value=1.0,
+            step=0.05,
+            key="tts_speed",
+            help="0.5x = half speed, 1.0x = normal, 2.0x = double speed",
+        )
+    with col_info:
+        st.metric("Multiplier", f"{speed:.2f}x")
+
+    text = st.text_area(
+        "Text to speak *",
+        height=180,
+        key="tts_text",
+        placeholder="Type or paste the text you want to hear...",
+    )
+    st.caption(f"Characters: {len(text)}")
+
+    if st.button("🔊 Generate Speech", use_container_width=True):
+        if not text.strip():
+            st.error("Please enter some text.")
+            return
+
+        rate_percent = int(round((speed - 1.0) * 100))
+
+        with st.spinner("Generating audio... this may take a few seconds."):
+            try:
+                audio_bytes = synthesize_speech(
+                    text.strip(),
+                    selected_voice["id"],
+                    rate_percent,
+                )
+            except Exception as error:
+                st.error(f"Failed to generate audio: {error}")
+                return
+
+        st.session_state.tts_audio = audio_bytes
+        st.session_state.tts_voice_name = selected_voice["name"]
+
+    if st.session_state.get("tts_audio"):
+        st.divider()
+        st.markdown(
+            f"### 🎧 Output — {st.session_state.get('tts_voice_name', 'Audio')}"
+        )
+        st.audio(st.session_state.tts_audio, format="audio/mp3")
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M")
+        st.download_button(
+            "⬇ Download MP3",
+            data=st.session_state.tts_audio,
+            file_name=f"treats_speech_{stamp}.mp3",
+            mime="audio/mp3",
+            use_container_width=True,
+        )
+
+        if st.button("🗑 Clear audio", use_container_width=True):
+            st.session_state.tts_audio = None
+            st.session_state.tts_voice_name = ""
+            st.rerun()
+
+    st.divider()
+    st.markdown("### 💡 Tips")
+    st.markdown(
+        "- **Speed**: 0.8x–1.2x sounds most natural.\n"
+        "- **Pauses**: Add commas and periods for breathing room.\n"
+        "- **Long text**: Split into paragraphs for cleaner output.\n"
+        "- **Character voices**: Look for `Character:` in the description.\n"
+        "- **Arabic**: Use Arabic text with Arabic voices for best results."
+    )
+
+
+# ============================================================
 # SIDEBAR
 # ============================================================
 with st.sidebar:
@@ -702,36 +916,6 @@ with st.sidebar:
         """,
         unsafe_allow_html=True,
     )
-
-    if is_owner():
-        st.markdown(
-            '<span class="owner-badge">👑 Owner mode active</span>',
-            unsafe_allow_html=True,
-        )
-
-    st.divider()
-
-    # ---------- OWNER ACCESS ----------
-    with st.expander("🔑 Owner access", expanded=False):
-        if is_owner():
-            st.success("Owner mode active ✅")
-            if st.button("Log out", use_container_width=True):
-                st.session_state.is_owner = False
-                st.rerun()
-        else:
-            pw_input = st.text_input(
-                "Password",
-                type="password",
-                key="owner_pw_field",
-                label_visibility="collapsed",
-                placeholder="Owner password...",
-            )
-            if st.button("Unlock", use_container_width=True):
-                if check_owner_password(pw_input):
-                    st.session_state.is_owner = True
-                    st.rerun()
-                else:
-                    st.error("Wrong password")
 
     st.divider()
 
@@ -746,40 +930,108 @@ with st.sidebar:
 
     st.divider()
 
-    # ---------- CHAT-ONLY SETTINGS ----------
+    # ---------- CHAT-ONLY SETTINGS + CONVERSATIONS ----------
     if st.session_state.selected_tool == TOOL_CHAT:
-        st.markdown("### Settings")
-
-        st.selectbox(
-            "AI Model",
-            options=AVAILABLE_MODELS,
-            key="model",
-        )
-
-        st.slider(
-            "Temperature",
-            min_value=0.0,
-            max_value=1.5,
-            step=0.05,
-            key="temperature",
-            help="Lower = focused. Higher = creative.",
-        )
-
-        st.divider()
-        st.markdown("### Conversation")
-
-        message_count = len(st.session_state.messages)
-        if message_count == 0:
-            st.markdown(
-                '<div class="status-text">No messages yet.</div>',
-                unsafe_allow_html=True,
+        # Settings
+        with st.expander("⚙️ Settings", expanded=False):
+            st.selectbox(
+                "AI Model",
+                options=AVAILABLE_MODELS,
+                key="model",
             )
-        else:
-            st.markdown(
-                f'<div class="status-text">{message_count} messages</div>',
-                unsafe_allow_html=True,
+            st.slider(
+                "Temperature",
+                min_value=0.0,
+                max_value=1.5,
+                step=0.05,
+                key="temperature",
+                help="Lower = focused. Higher = creative.",
             )
 
+        # Conversations
+        st.markdown("### 💬 Conversations")
+
+        conv_items = list(st.session_state.conversations.items())
+        for cid, conv in reversed(conv_items):
+            is_current = (cid == st.session_state.current_conv_id)
+            prefix = "🟢" if is_current else "⚪"
+            title = conv.get("title", "Untitled")[:32]
+            if st.button(
+                f"{prefix} {title}",
+                key=f"select_{cid}",
+                use_container_width=True,
+            ):
+                if not is_current:
+                    switch_conversation(cid)
+                    st.rerun()
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("＋ New", use_container_width=True,
+                         key="new_chat_btn"):
+                cid = create_conversation()
+                switch_conversation(cid)
+                st.rerun()
+        with c2:
+            if st.button("🗑 Delete", use_container_width=True,
+                         key="del_chat_btn"):
+                delete_conversation(st.session_state.current_conv_id)
+                st.rerun()
+
+        # Rename
+        with st.expander("✏ Rename current chat", expanded=False):
+            current_title = st.session_state.conversations.get(
+                st.session_state.current_conv_id, {}
+            ).get("title", "")
+            new_title = st.text_input(
+                "New title",
+                value=current_title,
+                key="rename_input",
+            )
+            if st.button("Save title", use_container_width=True,
+                         key="save_title_btn"):
+                rename_conversation(
+                    st.session_state.current_conv_id, new_title
+                )
+                st.rerun()
+
+        # Save / Load
+        st.markdown("**💾 Save / Restore**")
+
+        st.download_button(
+            "⬇ Export all chats (JSON)",
+            data=export_all_conversations(),
+            file_name=(
+                f"treats_chats_"
+                f"{datetime.now().strftime('%Y%m%d_%H%M')}.json"
+            ),
+            mime="application/json",
+            use_container_width=True,
+            key="export_all_chats",
+        )
+
+        uploaded = st.file_uploader(
+            "📂 Import chats (.json)",
+            type=["json"],
+            key="import_chats_uploader",
+            label_visibility="visible",
+        )
+        if uploaded is not None:
+            file_sig = f"{uploaded.name}_{uploaded.size}"
+            if st.session_state.get("last_import_sig") != file_sig:
+                try:
+                    data = json.loads(uploaded.getvalue().decode("utf-8"))
+                    n = import_conversations(data)
+                    st.session_state.last_import_sig = file_sig
+                    if n > 0:
+                        st.success(f"Imported {n} conversation(s).")
+                        st.rerun()
+                    else:
+                        st.warning("No conversations found in file.")
+                except Exception as e:
+                    st.error(f"Import failed: {e}")
+
+        # Current chat export
         if st.session_state.messages:
             stamp = datetime.now().strftime("%Y%m%d_%H%M")
             c1, c2 = st.columns(2)
@@ -790,24 +1042,20 @@ with st.sidebar:
                     file_name=f"treats_{stamp}.md",
                     mime="text/markdown",
                     use_container_width=True,
+                    key="exp_md_btn",
                 )
             with c2:
                 st.download_button(
                     "⬇ JSON",
-                    data=export_json(),
+                    data=export_current_json(),
                     file_name=f"treats_{stamp}.json",
                     mime="application/json",
                     use_container_width=True,
+                    key="exp_json_btn",
                 )
 
-    # ---------- CHAT-ONLY: NEW CONVERSATION ----------
-    if st.session_state.selected_tool == TOOL_CHAT:
         st.divider()
-        if st.button("＋ New conversation", use_container_width=True):
-            clear_conversation()
-            st.rerun()
 
-    st.divider()
     st.markdown("### About")
     st.markdown(
         f"""
@@ -832,9 +1080,10 @@ st.markdown(
 )
 
 # ============================================================
-# API STATUS (only for tools that need AI)
+# API STATUS
 # ============================================================
-if not has_api_key() and st.session_state.selected_tool != TOOL_PASSWORD:
+tools_without_ai = {TOOL_PASSWORD, TOOL_TTS}
+if not has_api_key() and st.session_state.selected_tool not in tools_without_ai:
     st.warning(
         "Treats is running, but the Groq API key has not been "
         "configured in Streamlit Secrets."
@@ -858,11 +1107,14 @@ if current_tool == TOOL_VIDEO:
     render_video_generator()
     st.stop()
 
+if current_tool == TOOL_TTS:
+    render_tts()
+    st.stop()
+
 # ============================================================
 # BELOW: CHAT MODE ONLY
 # ============================================================
 
-# ---------- WELCOME SCREEN ----------
 if not st.session_state.messages:
     st.markdown(
         """
@@ -879,22 +1131,18 @@ if not st.session_state.messages:
     for col, starter in zip(cols, STARTER_PROMPTS):
         with col:
             if st.button(starter["label"], use_container_width=True):
-                st.session_state.messages.append(
-                    {"role": "user", "content": starter["prompt"]}
-                )
+                add_message("user", starter["prompt"])
                 st.session_state.pending = True
                 st.rerun()
 
-# ---------- CHAT INPUT ----------
 prompt = st.chat_input("Message Treats...")
 if prompt:
     prompt = prompt.strip()
     if prompt:
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        add_message("user", prompt)
         st.session_state.pending = True
         st.rerun()
 
-# ---------- DISPLAY CHAT HISTORY ----------
 for i, message in enumerate(st.session_state.messages):
     role = message.get("role")
     content = message.get("content", "")
@@ -920,7 +1168,6 @@ for i, message in enumerate(st.session_state.messages):
                         st.session_state.pending = True
                         st.rerun()
 
-# ---------- GENERATE ASSISTANT REPLY (if pending) ----------
 if st.session_state.pending:
     if (not st.session_state.messages
             or st.session_state.messages[-1]["role"] != "user"):
@@ -930,9 +1177,7 @@ if st.session_state.pending:
             try:
                 response = st.write_stream(stream_assistant_reply())
                 if response:
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": response}
-                    )
+                    add_message("assistant", response)
                     st.session_state.pending = False
                     st.rerun()
                 else:
