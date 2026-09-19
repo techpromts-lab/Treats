@@ -11,7 +11,7 @@ from groq import Groq
 # ============================================================
 # TREATS AI ASSISTANT
 # ============================================================
-# Version: 1.4.0
+# Version: 1.4.1
 # Platform: Streamlit
 # AI Provider: Groq
 # Tools: Chat, CV, Password, Video Script, Text-to-Speech
@@ -31,7 +31,7 @@ st.set_page_config(
 # APPLICATION CONSTANTS
 # ============================================================
 APP_NAME = "Treats"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 
 DEFAULT_MODEL = "openai/gpt-oss-20b"
 AVAILABLE_MODELS = [
@@ -102,11 +102,12 @@ STARTER_PROMPTS = [
 ]
 
 # ------------------------------------------------------------
-# TEXT-TO-SPEECH VOICE CATALOG
+# TEXT-TO-SPEECH VOICE CATALOG (curated — will be filtered
+# at runtime to only show voices that actually exist)
 # ------------------------------------------------------------
 VOICE_CATALOG = {
     "English": [
-        # --- Male voices ---
+        # Male
         {"id": "en-US-GuyNeural", "name": "Guy", "gender": "Male",
          "desc": "Deep, confident American — great for narrations"},
         {"id": "en-US-DavisNeural", "name": "Davis", "gender": "Male",
@@ -119,7 +120,7 @@ VOICE_CATALOG = {
          "desc": "Warm, storytelling — great for audiobooks"},
         {"id": "en-GB-RyanNeural", "name": "Ryan", "gender": "Male",
          "desc": "British, refined — elegant and classy"},
-        # --- Female voices ---
+        # Female
         {"id": "en-US-JennyNeural", "name": "Jenny", "gender": "Female",
          "desc": "Warm, friendly — natural everyday voice"},
         {"id": "en-US-AriaNeural", "name": "Aria", "gender": "Female",
@@ -134,7 +135,7 @@ VOICE_CATALOG = {
          "desc": "Young, child-like — playful and light"},
         {"id": "en-GB-SoniaNeural", "name": "Sonia", "gender": "Female",
          "desc": "British, elegant — polished and formal"},
-        # --- Character-style ---
+        # Character-style
         {"id": "en-US-NancyNeural", "name": "Nancy", "gender": "Female",
          "desc": "Character: wise elder — storytelling tone"},
         {"id": "en-US-SteffanNeural", "name": "Steffan", "gender": "Male",
@@ -246,6 +247,76 @@ def has_api_key() -> bool:
 
 
 # ============================================================
+# TTS: DYNAMIC VOICE FETCHING + SYNTHESIS
+# ============================================================
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_available_voice_ids():
+    """Fetch the live list of voice ShortNames from edge-tts.
+    Cached for 1 hour. Returns a set of ShortName strings."""
+    async def _run():
+        voices = await edge_tts.list_voices()
+        return {v["ShortName"] for v in voices}
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_run())
+    finally:
+        loop.close()
+
+
+def get_working_catalog():
+    """Filter VOICE_CATALOG to only include voices that exist.
+    Returns (catalog, removed_list)."""
+    try:
+        available = fetch_available_voice_ids()
+    except Exception:
+        # If we can't fetch, just return the full catalog
+        return VOICE_CATALOG, []
+
+    filtered = {}
+    removed = []
+    for lang, voices in VOICE_CATALOG.items():
+        working = []
+        for v in voices:
+            if v["id"] in available:
+                working.append(v)
+            else:
+                removed.append(f"{lang} · {v['name']} ({v['id']})")
+        filtered[lang] = working
+    return filtered, removed
+
+
+def synthesize_speech(text: str, voice_id: str, rate_percent: int) -> bytes:
+    """Generate MP3 audio bytes using edge-tts with retry."""
+    rate_str = f"{rate_percent:+d}%"
+
+    async def _run() -> bytes:
+        communicate = edge_tts.Communicate(text, voice_id, rate=rate_str)
+        audio = b""
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio += chunk["data"]
+        return audio
+
+    last_error = None
+    for attempt in range(2):  # try twice
+        try:
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(_run())
+            finally:
+                loop.close()
+        except Exception as e:
+            last_error = e
+            continue
+
+    raise RuntimeError(
+        f"Voice `{voice_id}` failed after 2 attempts. "
+        f"Details: {last_error}"
+    )
+
+
+# ============================================================
 # SESSION STATE
 # ============================================================
 def initialize_session():
@@ -270,7 +341,6 @@ def initialize_session():
     if "last_import_sig" not in st.session_state:
         st.session_state.last_import_sig = ""
 
-    # ensure at least one conversation exists
     if not st.session_state.conversations:
         cid = datetime.now().strftime("%Y%m%d%H%M%S%f")
         st.session_state.conversations[cid] = {
@@ -309,13 +379,11 @@ def create_conversation(title="New chat") -> str:
 
 
 def _sync_messages_to_conv():
-    """Save current session messages into the active conversation."""
     cid = st.session_state.get("current_conv_id")
     if not cid or cid not in st.session_state.conversations:
         return
     conv = st.session_state.conversations[cid]
     conv["messages"] = list(st.session_state.messages)
-    # auto-title from first user message
     if conv["title"] in ("New chat", "", None):
         for m in st.session_state.messages:
             if m.get("role") == "user" and m.get("content", "").strip():
@@ -520,32 +588,11 @@ def stream_assistant_reply():
 
 
 # ============================================================
-# TTS ENGINE (edge-tts)
-# ============================================================
-def synthesize_speech(text: str, voice_id: str, rate_percent: int) -> bytes:
-    rate_str = f"{rate_percent:+d}%"
-
-    async def _run() -> bytes:
-        communicate = edge_tts.Communicate(text, voice_id, rate=rate_str)
-        audio = b""
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio += chunk["data"]
-        return audio
-
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(_run())
-    finally:
-        loop.close()
-
-
-# ============================================================
 # TOOL 1: CV GENERATOR
 # ============================================================
 def render_cv_generator():
     st.markdown("## 📄 CV Generator")
-    st.caption("Generate a professional CV — download as Markdown.")
+    st.caption("Generate a professional CV — download as Markdown or Text.")
 
     with st.form("cv_form"):
         col_a, col_b = st.columns(2)
@@ -810,12 +857,43 @@ def render_tts():
         "listen, and download as MP3."
     )
 
+    # ---------- Get working catalog ----------
+    catalog, removed = get_working_catalog()
+
+    # Show a warning if some curated voices are unavailable
+    if removed:
+        with st.expander(
+            f"⚠️ {len(removed)} voice(s) unavailable — click for details",
+            expanded=False,
+        ):
+            st.caption(
+                "These voices were removed by Microsoft or are "
+                "temporarily unavailable:"
+            )
+            for r in removed:
+                st.markdown(f"- `{r}`")
+            if st.button("🔄 Refresh voice list", key="refresh_voices"):
+                st.cache_data.clear()
+                st.rerun()
+
+    if not catalog or all(len(v) == 0 for v in catalog.values()):
+        st.error(
+            "⚠️ Could not load any voices. This may be a network issue. "
+            "Please try again in a moment."
+        )
+        if st.button("🔄 Retry", key="retry_voices"):
+            st.cache_data.clear()
+            st.rerun()
+        return
+
+    # ---------- Language ----------
+    available_langs = [l for l, v in catalog.items() if v]
     language = st.selectbox(
         "Language",
-        options=list(VOICE_CATALOG.keys()),
+        options=available_langs,
         key="tts_language",
     )
-    voices = VOICE_CATALOG[language]
+    voices = catalog[language]
 
     voice_labels = [
         f"{v['name']}  ·  {v['gender']}  ·  {v['desc']}" for v in voices
@@ -828,6 +906,7 @@ def render_tts():
     )
     selected_voice = voices[selected_index]
 
+    # ---------- Speed ----------
     col_speed, col_info = st.columns([2, 1])
     with col_speed:
         speed = st.slider(
@@ -842,6 +921,7 @@ def render_tts():
     with col_info:
         st.metric("Multiplier", f"{speed:.2f}x")
 
+    # ---------- Text ----------
     text = st.text_area(
         "Text to speak *",
         height=180,
@@ -857,7 +937,9 @@ def render_tts():
 
         rate_percent = int(round((speed - 1.0) * 100))
 
-        with st.spinner("Generating audio... this may take a few seconds."):
+        with st.spinner(
+            f"Generating audio with {selected_voice['name']}..."
+        ):
             try:
                 audio_bytes = synthesize_speech(
                     text.strip(),
@@ -865,7 +947,12 @@ def render_tts():
                     rate_percent,
                 )
             except Exception as error:
-                st.error(f"Failed to generate audio: {error}")
+                st.error(
+                    f"❌ Voice **{selected_voice['name']}** failed.\n\n"
+                    f"**Try another voice** — some voices are "
+                    f"temporarily unavailable.\n\n"
+                    f"Technical details: `{error}`"
+                )
                 return
 
         st.session_state.tts_audio = audio_bytes
@@ -896,10 +983,10 @@ def render_tts():
     st.markdown("### 💡 Tips")
     st.markdown(
         "- **Speed**: 0.8x–1.2x sounds most natural.\n"
-        "- **Pauses**: Add commas and periods for breathing room.\n"
-        "- **Long text**: Split into paragraphs for cleaner output.\n"
-        "- **Character voices**: Look for `Character:` in the description.\n"
-        "- **Arabic**: Use Arabic text with Arabic voices for best results."
+        "- **If a voice fails**: Try a different one — some are "
+        "temporarily unavailable.\n"
+        "- **Arabic**: Use Arabic text with Arabic voices for best results.\n"
+        "- **Long text**: Split into paragraphs for cleaner output."
     )
 
 
@@ -919,7 +1006,6 @@ with st.sidebar:
 
     st.divider()
 
-    # ---------- TOOL SELECTOR ----------
     st.markdown("### 🛠️ Tools")
     st.radio(
         "Choose tool",
@@ -930,9 +1016,7 @@ with st.sidebar:
 
     st.divider()
 
-    # ---------- CHAT-ONLY SETTINGS + CONVERSATIONS ----------
     if st.session_state.selected_tool == TOOL_CHAT:
-        # Settings
         with st.expander("⚙️ Settings", expanded=False):
             st.selectbox(
                 "AI Model",
@@ -948,7 +1032,6 @@ with st.sidebar:
                 help="Lower = focused. Higher = creative.",
             )
 
-        # Conversations
         st.markdown("### 💬 Conversations")
 
         conv_items = list(st.session_state.conversations.items())
@@ -978,7 +1061,6 @@ with st.sidebar:
                 delete_conversation(st.session_state.current_conv_id)
                 st.rerun()
 
-        # Rename
         with st.expander("✏ Rename current chat", expanded=False):
             current_title = st.session_state.conversations.get(
                 st.session_state.current_conv_id, {}
@@ -995,7 +1077,6 @@ with st.sidebar:
                 )
                 st.rerun()
 
-        # Save / Load
         st.markdown("**💾 Save / Restore**")
 
         st.download_button(
@@ -1031,7 +1112,6 @@ with st.sidebar:
                 except Exception as e:
                     st.error(f"Import failed: {e}")
 
-        # Current chat export
         if st.session_state.messages:
             stamp = datetime.now().strftime("%Y%m%d_%H%M")
             c1, c2 = st.columns(2)
