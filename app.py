@@ -1,4 +1,6 @@
 import json
+import secrets as pysecrets
+import string
 from datetime import datetime
 
 import streamlit as st
@@ -7,9 +9,10 @@ from groq import Groq
 # ============================================================
 # TREATS AI ASSISTANT
 # ============================================================
-# Version: 1.1.0
+# Version: 1.2.0
 # Platform: Streamlit
 # AI Provider: Groq
+# Tools: Chat, CV Generator, Password Generator, Video Script
 # ============================================================
 
 # ============================================================
@@ -26,7 +29,7 @@ st.set_page_config(
 # APPLICATION CONSTANTS
 # ============================================================
 APP_NAME = "Treats"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 DEFAULT_MODEL = "openai/gpt-oss-20b"
 AVAILABLE_MODELS = [
@@ -36,6 +39,19 @@ AVAILABLE_MODELS = [
 DEFAULT_TEMPERATURE = 0.7
 MAX_CONTEXT_TOKENS = 6000
 REQUEST_TIMEOUT = 60  # seconds
+
+# Free usage limits per tool (ignored for owner)
+FREE_LIMITS = {
+    "cv": 1,
+    "password": 5,
+    "video": 1,
+}
+
+TOOL_CHAT = "💬 Chat"
+TOOL_CV = "📄 CV Generator"
+TOOL_PASSWORD = "🔐 Password Generator"
+TOOL_VIDEO = "🎬 Video Generator"
+ALL_TOOLS = [TOOL_CHAT, TOOL_CV, TOOL_PASSWORD, TOOL_VIDEO]
 
 SYSTEM_PROMPT = """
 You are Treats, a helpful, intelligent, friendly, and reliable AI assistant.
@@ -151,6 +167,15 @@ st.markdown(
         color: #777777;
         font-size: 16px;
     }
+    .owner-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        background: #FFF3CD;
+        color: #8A6D3B;
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 600;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -192,7 +217,12 @@ def initialize_session():
         "messages": [],
         "model": DEFAULT_MODEL,
         "temperature": DEFAULT_TEMPERATURE,
-        "pending": False,   # True when we need to generate a reply
+        "pending": False,
+        "selected_tool": TOOL_CHAT,
+        "is_owner": False,
+        "used_cv": 0,
+        "used_password": 0,
+        "used_video": 0,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -203,7 +233,7 @@ initialize_session()
 
 
 # ============================================================
-# HELPERS
+# CHAT HELPERS
 # ============================================================
 def estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 characters per token."""
@@ -320,6 +350,346 @@ def export_json() -> str:
 
 
 # ============================================================
+# OWNER ACCESS + USAGE LIMITS
+# ============================================================
+def check_owner_password(password: str) -> bool:
+    """Return True if password matches OWNER_PASSWORD in secrets."""
+    try:
+        correct = st.secrets.get("OWNER_PASSWORD", "")
+        return bool(correct) and password == correct
+    except Exception:
+        return False
+
+
+def is_owner() -> bool:
+    return st.session_state.get("is_owner", False)
+
+
+def remaining_uses(tool_key: str):
+    """Return remaining free uses, or ∞ for owner."""
+    if is_owner():
+        return "∞"
+    used = st.session_state.get(f"used_{tool_key}", 0)
+    limit = FREE_LIMITS.get(tool_key, 0)
+    return max(0, limit - used)
+
+
+def consume_use(tool_key: str) -> bool:
+    """Try to consume one use of a tool. Return True if allowed."""
+    if is_owner():
+        return True
+    used = st.session_state.get(f"used_{tool_key}", 0)
+    limit = FREE_LIMITS.get(tool_key, 0)
+    if used >= limit:
+        return False
+    st.session_state[f"used_{tool_key}"] = used + 1
+    return True
+
+
+def show_limit_reached(tool_name: str) -> None:
+    st.warning(
+        f"⚠️ You've used all your free **{tool_name}** requests."
+    )
+    st.info(
+        "💡 **To continue:**\n"
+        "- Upgrade to premium (coming soon), or\n"
+        "- Use the **🔑 Owner access** panel in the sidebar."
+    )
+
+
+# ============================================================
+# TOOL 1: CV GENERATOR
+# ============================================================
+def render_cv_generator():
+    st.markdown("## 📄 CV Generator")
+    st.caption(
+        f"Free uses left: **{remaining_uses('cv')}**"
+        + ("  ·  👑 Owner mode (unlimited)" if is_owner() else "")
+    )
+
+    if remaining_uses("cv") == 0 and not is_owner():
+        show_limit_reached("CV Generator")
+        return
+
+    with st.form("cv_form"):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            full_name = st.text_input(
+                "Full name *", placeholder="e.g. Mohammad Ahmad"
+            )
+        with col_b:
+            target_role = st.text_input(
+                "Target role", placeholder="e.g. Software Engineer"
+            )
+
+        experience = st.text_area(
+            "Describe your experience *",
+            height=200,
+            placeholder=(
+                "Write freely in any language. Example:\n"
+                "I'm a software engineer with 5 years of experience "
+                "in Python and AWS. I worked at Company X for 3 years "
+                "where I led a team of 4. Before that, I worked at..."
+            ),
+        )
+
+        col_c, col_d = st.columns(2)
+        with col_c:
+            cv_language = st.selectbox("CV language", ["English", "Arabic"])
+        with col_d:
+            tone = st.selectbox(
+                "Tone", ["Professional", "Concise", "Academic"]
+            )
+
+        submitted = st.form_submit_button(
+            "✨ Generate CV", use_container_width=True
+        )
+
+    if not submitted:
+        return
+
+    if not full_name.strip() or not experience.strip():
+        st.error("Please fill in your name and experience.")
+        return
+
+    client = get_client()
+    if client is None:
+        st.error("AI service not configured.")
+        return
+
+    if not consume_use("cv"):
+        show_limit_reached("CV Generator")
+        return
+
+    cv_prompt = f"""
+    Create a professional CV in {cv_language} based on the information below.
+    Tone: {tone}.
+
+    Full name: {full_name}
+    Target role: {target_role or "(not specified)"}
+    Experience (raw input): {experience}
+
+    Output in clean Markdown with these sections:
+    # Full Name
+    ## Professional Summary  (2-4 sentences)
+    ## Work Experience  (company, role, dates, 3-5 bullet achievements)
+    ## Education
+    ## Skills  (as a comma-separated list)
+    ## Languages
+
+    Rules:
+    - Do NOT invent facts. If a section has no info, either omit it or keep it minimal.
+    - Convert vague descriptions into concrete bullet points.
+    - Use strong action verbs.
+    - Keep it ATS-friendly (no tables, no images).
+    """
+
+    with st.spinner("Generating your CV..."):
+        try:
+            response = client.chat.completions.create(
+                model=st.session_state.model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": cv_prompt},
+                ],
+                temperature=0.5,
+                max_completion_tokens=2048,
+                timeout=REQUEST_TIMEOUT,
+            )
+            cv_text = response.choices[0].message.content
+        except Exception as error:
+            st.error(format_error(error))
+            return
+
+    st.divider()
+    st.markdown(cv_text)
+    st.divider()
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    st.download_button(
+        "⬇ Download CV (Markdown)",
+        data=cv_text,
+        file_name=f"cv_{stamp}.md",
+        mime="text/markdown",
+        use_container_width=True,
+    )
+
+
+# ============================================================
+# TOOL 2: PASSWORD GENERATOR
+# ============================================================
+def render_password_generator():
+    st.markdown("## 🔐 Password Generator")
+    st.caption(
+        f"Free uses left: **{remaining_uses('password')}**"
+        + ("  ·  👑 Owner mode (unlimited)" if is_owner() else "")
+    )
+
+    if remaining_uses("password") == 0 and not is_owner():
+        show_limit_reached("Password Generator")
+        return
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        length = st.slider("Length", 8, 64, 16)
+    with col2:
+        use_symbols = st.checkbox("Include symbols", value=True)
+    with col3:
+        use_numbers = st.checkbox("Include numbers", value=True)
+
+    if st.button("🎲 Generate password", use_container_width=True):
+        if not consume_use("password"):
+            show_limit_reached("Password Generator")
+            return
+
+        alphabet = string.ascii_letters
+        if use_numbers:
+            alphabet += string.digits
+        if use_symbols:
+            alphabet += "!@#$%^&*()-_=+[]{};:,.?/"
+
+        password = "".join(
+            pysecrets.choice(alphabet) for _ in range(length)
+        )
+
+        st.success("Password generated!")
+        st.code(password, language=None)
+        st.caption("💡 Use the copy icon in the top-right of the box.")
+
+    st.divider()
+    st.markdown("### 💪 Strength tips")
+    st.markdown(
+        "- Use **16+ characters** for important accounts.\n"
+        "- Never reuse passwords across sites.\n"
+        "- Store them in a password manager (Bitwarden, 1Password).\n"
+        "- Enable **2FA** wherever possible."
+    )
+
+
+# ============================================================
+# TOOL 3: VIDEO SCRIPT GENERATOR
+# ============================================================
+def render_video_generator():
+    st.markdown("## 🎬 Video Script Generator")
+    st.caption(
+        f"Free uses left: **{remaining_uses('video')}**"
+        + ("  ·  👑 Owner mode (unlimited)" if is_owner() else "")
+    )
+
+    st.info(
+        "ℹ️ This tool generates a **complete video script + storyboard**. "
+        "Rendering the actual video requires an external service "
+        "(Runway, Replicate, etc.) — planned for a future version."
+    )
+
+    if remaining_uses("video") == 0 and not is_owner():
+        show_limit_reached("Video Script Generator")
+        return
+
+    with st.form("video_form"):
+        topic = st.text_input(
+            "Video topic *",
+            placeholder="e.g. How to start a startup in Jordan",
+        )
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            duration = st.selectbox(
+                "Target duration",
+                ["30 seconds", "60 seconds", "2-3 minutes", "5 minutes"],
+            )
+        with col_b:
+            style = st.selectbox(
+                "Style",
+                ["Educational", "Marketing / Ad", "Storytelling", "Tutorial"],
+            )
+
+        col_c, col_d = st.columns(2)
+        with col_c:
+            language = st.selectbox("Language", ["English", "Arabic"])
+        with col_d:
+            platform = st.selectbox(
+                "Platform", ["YouTube", "TikTok / Reels", "LinkedIn", "General"]
+            )
+
+        submitted = st.form_submit_button(
+            "🎬 Generate script", use_container_width=True
+        )
+
+    if not submitted:
+        return
+
+    if not topic.strip():
+        st.error("Please enter a topic.")
+        return
+
+    client = get_client()
+    if client is None:
+        st.error("AI service not configured.")
+        return
+
+    if not consume_use("video"):
+        show_limit_reached("Video Script Generator")
+        return
+
+    video_prompt = f"""
+    Create a complete video script in {language} for a {duration} {style} video
+    about: "{topic}". Target platform: {platform}.
+
+    Structure:
+
+    ## 🎯 Hook (first 3 seconds)
+    A strong opening line that grabs attention.
+
+    ## 📝 Script
+    Timestamped speaker lines. Format:
+    [0:00-0:05] Speaker: "..."
+    [0:05-0:15] Speaker: "..."
+
+    ## 🎥 Visual notes (storyboard)
+    For each timestamp, describe what should be on screen.
+
+    ## 🎵 Music / tone
+    Suggest background music style and overall vibe.
+
+    ## 📢 Call to action
+    A clear CTA appropriate for {platform}.
+
+    Be concrete and production-ready. No filler.
+    """
+
+    with st.spinner("Writing your video script..."):
+        try:
+            response = client.chat.completions.create(
+                model=st.session_state.model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": video_prompt},
+                ],
+                temperature=0.8,
+                max_completion_tokens=2048,
+                timeout=REQUEST_TIMEOUT,
+            )
+            script = response.choices[0].message.content
+        except Exception as error:
+            st.error(format_error(error))
+            return
+
+    st.divider()
+    st.markdown(script)
+    st.divider()
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    st.download_button(
+        "⬇ Download script (Markdown)",
+        data=script,
+        file_name=f"video_script_{stamp}.md",
+        mime="text/markdown",
+        use_container_width=True,
+    )
+
+
+# ============================================================
 # SIDEBAR
 # ============================================================
 with st.sidebar:
@@ -332,65 +702,110 @@ with st.sidebar:
         """,
         unsafe_allow_html=True,
     )
-    st.divider()
 
-    if st.button("＋ New conversation", use_container_width=True):
-        clear_conversation()
-        st.rerun()
-
-    st.divider()
-    st.markdown("### Settings")
-
-    st.selectbox(
-        "AI Model",
-        options=AVAILABLE_MODELS,
-        key="model",
-    )
-
-    st.slider(
-        "Temperature",
-        min_value=0.0,
-        max_value=1.5,
-        step=0.05,
-        key="temperature",
-        help="Lower = focused and deterministic. Higher = creative.",
-    )
-
-    st.divider()
-    st.markdown("### Conversation")
-
-    message_count = len(st.session_state.messages)
-    if message_count == 0:
+    if is_owner():
         st.markdown(
-            '<div class="status-text">No messages yet.</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            f'<div class="status-text">{message_count} messages</div>',
+            '<span class="owner-badge">👑 Owner mode active</span>',
             unsafe_allow_html=True,
         )
 
-    # Export buttons — only shown when there is something to export
-    if st.session_state.messages:
-        stamp = datetime.now().strftime("%Y%m%d_%H%M")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.download_button(
-                "⬇ MD",
-                data=export_markdown(),
-                file_name=f"treats_{stamp}.md",
-                mime="text/markdown",
-                use_container_width=True,
+    st.divider()
+
+    # ---------- OWNER ACCESS ----------
+    with st.expander("🔑 Owner access", expanded=False):
+        if is_owner():
+            st.success("Owner mode active ✅")
+            if st.button("Log out", use_container_width=True):
+                st.session_state.is_owner = False
+                st.rerun()
+        else:
+            pw_input = st.text_input(
+                "Password",
+                type="password",
+                key="owner_pw_field",
+                label_visibility="collapsed",
+                placeholder="Owner password...",
             )
-        with c2:
-            st.download_button(
-                "⬇ JSON",
-                data=export_json(),
-                file_name=f"treats_{stamp}.json",
-                mime="application/json",
-                use_container_width=True,
+            if st.button("Unlock", use_container_width=True):
+                if check_owner_password(pw_input):
+                    st.session_state.is_owner = True
+                    st.rerun()
+                else:
+                    st.error("Wrong password")
+
+    st.divider()
+
+    # ---------- TOOL SELECTOR ----------
+    st.markdown("### 🛠️ Tools")
+    st.radio(
+        "Choose tool",
+        options=ALL_TOOLS,
+        key="selected_tool",
+        label_visibility="collapsed",
+    )
+
+    st.divider()
+
+    # ---------- CHAT-ONLY SETTINGS ----------
+    if st.session_state.selected_tool == TOOL_CHAT:
+        st.markdown("### Settings")
+
+        st.selectbox(
+            "AI Model",
+            options=AVAILABLE_MODELS,
+            key="model",
+        )
+
+        st.slider(
+            "Temperature",
+            min_value=0.0,
+            max_value=1.5,
+            step=0.05,
+            key="temperature",
+            help="Lower = focused. Higher = creative.",
+        )
+
+        st.divider()
+        st.markdown("### Conversation")
+
+        message_count = len(st.session_state.messages)
+        if message_count == 0:
+            st.markdown(
+                '<div class="status-text">No messages yet.</div>',
+                unsafe_allow_html=True,
             )
+        else:
+            st.markdown(
+                f'<div class="status-text">{message_count} messages</div>',
+                unsafe_allow_html=True,
+            )
+
+        if st.session_state.messages:
+            stamp = datetime.now().strftime("%Y%m%d_%H%M")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.download_button(
+                    "⬇ MD",
+                    data=export_markdown(),
+                    file_name=f"treats_{stamp}.md",
+                    mime="text/markdown",
+                    use_container_width=True,
+                )
+            with c2:
+                st.download_button(
+                    "⬇ JSON",
+                    data=export_json(),
+                    file_name=f"treats_{stamp}.json",
+                    mime="application/json",
+                    use_container_width=True,
+                )
+
+    # ---------- CHAT-ONLY: NEW CONVERSATION ----------
+    if st.session_state.selected_tool == TOOL_CHAT:
+        st.divider()
+        if st.button("＋ New conversation", use_container_width=True):
+            clear_conversation()
+            st.rerun()
 
     st.divider()
     st.markdown("### About")
@@ -398,11 +813,7 @@ with st.sidebar:
         f"""
         **{APP_NAME}**
         Version {APP_VERSION}
-        A general-purpose AI assistant built with:
-        - Python
-        - Streamlit
-        - Groq
-        - GitHub
+        Built with Python · Streamlit · Groq
         """
     )
 
@@ -411,27 +822,47 @@ with st.sidebar:
 # MAIN HEADER
 # ============================================================
 st.markdown(
-    """
+    f"""
     <div class="treats-header">
         <div class="treats-logo">Treats</div>
-        <div class="treats-subtitle">Your AI assistant</div>
+        <div class="treats-subtitle">{st.session_state.selected_tool}</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 # ============================================================
-# API STATUS
+# API STATUS (only for tools that need AI)
 # ============================================================
-if not has_api_key():
+if not has_api_key() and st.session_state.selected_tool != TOOL_PASSWORD:
     st.warning(
         "Treats is running, but the Groq API key has not been "
         "configured in Streamlit Secrets."
     )
 
+
 # ============================================================
-# WELCOME SCREEN
+# TOOL ROUTING
 # ============================================================
+current_tool = st.session_state.selected_tool
+
+if current_tool == TOOL_CV:
+    render_cv_generator()
+    st.stop()
+
+if current_tool == TOOL_PASSWORD:
+    render_password_generator()
+    st.stop()
+
+if current_tool == TOOL_VIDEO:
+    render_video_generator()
+    st.stop()
+
+# ============================================================
+# BELOW: CHAT MODE ONLY
+# ============================================================
+
+# ---------- WELCOME SCREEN ----------
 if not st.session_state.messages:
     st.markdown(
         """
@@ -454,9 +885,7 @@ if not st.session_state.messages:
                 st.session_state.pending = True
                 st.rerun()
 
-# ============================================================
-# CHAT INPUT
-# ============================================================
+# ---------- CHAT INPUT ----------
 prompt = st.chat_input("Message Treats...")
 if prompt:
     prompt = prompt.strip()
@@ -465,9 +894,7 @@ if prompt:
         st.session_state.pending = True
         st.rerun()
 
-# ============================================================
-# DISPLAY CHAT HISTORY
-# ============================================================
+# ---------- DISPLAY CHAT HISTORY ----------
 for i, message in enumerate(st.session_state.messages):
     role = message.get("role")
     content = message.get("content", "")
@@ -477,7 +904,6 @@ for i, message in enumerate(st.session_state.messages):
     with st.chat_message(role):
         st.markdown(content)
 
-        # Action buttons for assistant messages
         if role == "assistant":
             is_last = (i == len(st.session_state.messages) - 1)
             actions = st.columns([1, 1, 6])
@@ -494,9 +920,7 @@ for i, message in enumerate(st.session_state.messages):
                         st.session_state.pending = True
                         st.rerun()
 
-# ============================================================
-# GENERATE ASSISTANT REPLY (if pending)
-# ============================================================
+# ---------- GENERATE ASSISTANT REPLY (if pending) ----------
 if st.session_state.pending:
     if (not st.session_state.messages
             or st.session_state.messages[-1]["role"] != "user"):
@@ -512,11 +936,14 @@ if st.session_state.pending:
                     st.session_state.pending = False
                     st.rerun()
                 else:
-                    st.error("Treats returned an empty response. Please try again.")
+                    st.error(
+                        "Treats returned an empty response. Please try again."
+                    )
                     st.session_state.pending = False
             except TreatsError as error:
                 st.error(str(error))
                 st.session_state.pending = False
+
 
 # ============================================================
 # FOOTER
