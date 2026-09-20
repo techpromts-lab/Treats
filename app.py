@@ -4,7 +4,6 @@ import json
 import random
 import asyncio
 import io
-import os
 from urllib.parse import quote
 from datetime import datetime
 
@@ -27,7 +26,7 @@ def get_client():
     from groq import Groq
     api_key = st.secrets.get("GROQ_API_KEY")
     if not api_key:
-        raise TreatsError("GROQ_API_KEY غير موجود في secrets.")
+        raise TreatsError("GROQ_API_KEY not found in secrets.")
     return Groq(api_key=api_key)
 
 AVAILABLE_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"]
@@ -55,32 +54,29 @@ def trim_history(messages, max_tokens=MAX_CONTEXT_TOKENS):
 # ============================================================
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_image_models():
-    """جلب قائمة موديلات توليد الصور ديناميكيًا."""
+    """Fetch available image models dynamically."""
     try:
         r = requests.get("https://image.pollinations.ai/models", timeout=10)
         r.raise_for_status()
         data = r.json()
-        # API قد يرجع list أو dict — نتعامل مع الحالتين
         if isinstance(data, list):
             models = [m.get("name") or m for m in data] if data and isinstance(data[0], dict) else data
         elif isinstance(data, dict):
             models = list(data.keys())
         else:
             models = ["flux", "turbo", "flux-realism"]
-        # فلترة القيم غير الصالحة
         models = [str(m) for m in models if m]
         return models if models else ["flux", "turbo"]
     except Exception:
-        # fallback
         return ["flux", "turbo", "flux-realism", "flux-anime", "flux-3d"]
 
 
 def generate_image(prompt: str, width: int = 1024, height: int = 1024,
                    model: str = "flux", seed: int = None,
                    enhance: bool = True, nologo: bool = True) -> bytes:
-    """يولّد صورة من Pollinations ويرجع bytes."""
+    """Generate an image via Pollinations and return bytes."""
     if not prompt or not prompt.strip():
-        raise TreatsError("اكتب وصف الصورة أولاً.")
+        raise TreatsError("Please enter an image prompt.")
 
     encoded = quote(prompt.strip())
     url = f"https://image.pollinations.ai/prompt/{encoded}"
@@ -97,15 +93,15 @@ def generate_image(prompt: str, width: int = 1024, height: int = 1024,
     try:
         r = requests.get(url, params=params, timeout=60)
         if r.status_code == 429:
-            raise TreatsError("الخدمة مشغولة حاليًا (Rate limit). حاول بعد شوية.")
+            raise TreatsError("Service is busy (rate limit). Please try again shortly.")
         r.raise_for_status()
         if not r.content or len(r.content) < 500:
-            raise TreatsError("الصورة رجعت فارغة أو تالفة. جرّب وصف تاني.")
+            raise TreatsError("Image came back empty or corrupted. Try a different prompt.")
         return r.content
     except requests.exceptions.Timeout:
-        raise TreatsError("انتهت مدة الانتظار (60ث). جرّب وصف أبسط أو أبعاد أصغر.")
+        raise TreatsError("Request timed out (60s). Try a simpler prompt or smaller size.")
     except requests.exceptions.RequestException as e:
-        raise TreatsError(f"فشل الاتصال بـ Pollinations: {e}")
+        raise TreatsError(f"Failed to reach Pollinations: {e}")
 
 
 # ============================================================
@@ -113,7 +109,7 @@ def generate_image(prompt: str, width: int = 1024, height: int = 1024,
 # ============================================================
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_available_voice_ids():
-    """جلب الأصوات المتاحة ديناميكيًا من edge-tts."""
+    """Fetch available voices dynamically from edge-tts."""
     try:
         import edge_tts
         async def _list():
@@ -151,7 +147,7 @@ TOOLS = {
 
 with st.sidebar:
     st.title("🧠 Treats")
-    choice_label = st.radio("الأدوات", list(TOOLS.keys()), label_visibility="collapsed")
+    choice_label = st.radio("Tools", list(TOOLS.keys()), label_visibility="collapsed")
     tool = TOOLS[choice_label]
     st.divider()
     st.caption("Treats v1.5.0")
@@ -176,7 +172,7 @@ def render_chat():
             st.session_state.messages = []
             st.rerun()
 
-    # عرض الرسائل
+    # Render messages
     for i, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -184,21 +180,20 @@ def render_chat():
                 c1, c2 = st.columns([1, 9])
                 with c1:
                     if st.button("📋", key=f"copy_{i}", help="Copy"):
-                        st.toast("انسخ النص يدويًا (st.code أدناه)")
+                        st.toast("Copy the text manually (see code block below).")
                     if st.button("🔄", key=f"regen_{i}", help="Regenerate"):
-                        # إزالة آخر رد وإعادة التوليد
                         st.session_state.messages = st.session_state.messages[:i]
                         st.session_state.regenerate = True
                         st.rerun()
 
     # Starter prompts
     if not st.session_state.messages:
-        st.markdown("**جرّب:**")
+        st.markdown("**Try:**")
         cols = st.columns(3)
         starters = [
-            "اشرح لي الـ Vector Databases ببساطة.",
-            "اكتب لي إيميل احترافي لطلب إجازة.",
-            "اعطني 5 أفكار لمشاريع Streamlit.",
+            "Explain Vector Databases in simple terms.",
+            "Write a professional email requesting time off.",
+            "Give me 5 ideas for Streamlit projects.",
         ]
         for c, s in zip(cols, starters):
             with c:
@@ -206,13 +201,13 @@ def render_chat():
                     st.session_state.messages.append({"role": "user", "content": s})
                     st.rerun()
 
-    # إدخال
-    prompt = st.chat_input("اكتب رسالتك...")
+    # Input
+    prompt = st.chat_input("Type your message...")
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.rerun()
 
-    # توليد الرد
+    # Generate response
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
         try:
             client = get_client()
@@ -236,7 +231,7 @@ def render_chat():
         except TreatsError as e:
             st.error(str(e))
         except Exception as e:
-            st.error(f"خطأ غير متوقع: {e}")
+            st.error(f"Unexpected error: {e}")
 
     # Export
     if st.session_state.messages:
@@ -267,29 +262,29 @@ def render_chat():
 def render_cv():
     st.header("📄 CV Generator")
     with st.form("cv_form"):
-        name = st.text_input("الاسم الكامل")
-        role = st.text_input("الوظيفة المستهدفة")
-        exp = st.text_area("الخبرات (نقاط، سطر لكل خبرة)")
-        edu = st.text_input("التعليم")
-        skills = st.text_input("المهارات (مفصولة بفواصل)")
-        lang = st.selectbox("اللغة", ["العربية", "English"])
-        tone = st.selectbox("النبرة", ["Professional", "Concise", "Academic"])
-        submitted = st.form_submit_button("✨ توليد السيرة")
+        name = st.text_input("Full Name")
+        role = st.text_input("Target Role")
+        exp = st.text_area("Experience (one bullet per line)")
+        edu = st.text_input("Education")
+        skills = st.text_input("Skills (comma-separated)")
+        lang = st.selectbox("Language", ["English", "Arabic"])
+        tone = st.selectbox("Tone", ["Professional", "Concise", "Academic"])
+        submitted = st.form_submit_button("✨ Generate CV")
 
     if submitted:
         if not name or not role:
-            st.warning("الاسم والوظيفة مطلوبان.")
+            st.warning("Name and role are required.")
             return
         try:
             client = get_client()
-            prompt = f"""اكتب سيرة ذاتية احترافية باللغة {lang} بنبرة {tone}.
-الاسم: {name}
-الوظيفة: {role}
-الخبرات: {exp}
-التعليم: {edu}
-المهارات: {skills}
-اجعلها بتنسيق Markdown منظم مع عناوين واضحة."""
-            with st.spinner("جاري التوليد..."):
+            prompt = f"""Write a professional CV in {lang} with a {tone} tone.
+Name: {name}
+Role: {role}
+Experience: {exp}
+Education: {edu}
+Skills: {skills}
+Format it in clean Markdown with clear headings."""
+            with st.spinner("Generating..."):
                 resp = client.chat.completions.create(
                     model="openai/gpt-oss-120b",
                     messages=[{"role": "user", "content": prompt}],
@@ -297,12 +292,12 @@ def render_cv():
                 )
             cv_text = resp.choices[0].message.content
             st.markdown(cv_text)
-            st.download_button("⬇️ تحميل MD", cv_text, "cv.md", "text/markdown")
-            st.download_button("⬇️ تحميل TXT", cv_text, "cv.txt", "text/plain")
+            st.download_button("⬇️ Download MD", cv_text, "cv.md", "text/markdown")
+            st.download_button("⬇️ Download TXT", cv_text, "cv.txt", "text/plain")
         except TreatsError as e:
             st.error(str(e))
         except Exception as e:
-            st.error(f"خطأ: {e}")
+            st.error(f"Error: {e}")
 
 
 # ============================================================
@@ -312,9 +307,9 @@ def render_password():
     st.header("🔐 Password Generator")
     import string
 
-    length = st.slider("الطول", 8, 64, 16)
-    use_symbols = st.checkbox("رموز (!@#$...)", value=True)
-    use_numbers = st.checkbox("أرقام", value=True)
+    length = st.slider("Length", 8, 64, 16)
+    use_symbols = st.checkbox("Symbols (!@#$...)", value=True)
+    use_numbers = st.checkbox("Numbers", value=True)
 
     chars = string.ascii_letters
     if use_numbers:
@@ -322,10 +317,10 @@ def render_password():
     if use_symbols:
         chars += "!@#$%^&*()-_=+"
 
-    if st.button("🎲 توليد"):
+    if st.button("🎲 Generate"):
         pwd = "".join(random.choice(chars) for _ in range(length))
         st.code(pwd, language=None)
-        st.download_button("⬇️ تحميل", pwd, "password.txt")
+        st.download_button("⬇️ Download", pwd, "password.txt")
 
 
 # ============================================================
@@ -334,25 +329,25 @@ def render_password():
 def render_video():
     st.header("🎬 Video Script Generator")
     with st.form("video_form"):
-        topic = st.text_input("الموضوع")
-        duration = st.selectbox("المدة", ["30 ثانية", "60 ثانية", "3 دقائق", "5 دقائق"])
-        style = st.selectbox("الأسلوب", ["تعليمي", "ترويجي", "قصصي", "ترفيهي"])
-        lang = st.selectbox("اللغة", ["العربية", "English"])
-        platform = st.selectbox("المنصة", ["YouTube", "TikTok", "Instagram", "LinkedIn"])
-        submitted = st.form_submit_button("🎬 توليد السكربت")
+        topic = st.text_input("Topic")
+        duration = st.selectbox("Duration", ["30 seconds", "60 seconds", "3 minutes", "5 minutes"])
+        style = st.selectbox("Style", ["Educational", "Promotional", "Storytelling", "Entertainment"])
+        lang = st.selectbox("Language", ["English", "Arabic"])
+        platform = st.selectbox("Platform", ["YouTube", "TikTok", "Instagram", "LinkedIn"])
+        submitted = st.form_submit_button("🎬 Generate Script")
 
     if submitted:
         if not topic:
-            st.warning("اكتب الموضوع.")
+            st.warning("Please enter a topic.")
             return
         try:
             client = get_client()
-            prompt = f"""اكتب سكربت فيديو باللغة {lang} لمنصة {platform}.
-الموضوع: {topic}
-المدة: {duration}
-الأسلوب: {style}
-قسّمه إلى مشاهد مع storyboard (الوقت + الوصف البصري + النص)."""
-            with st.spinner("جاري التوليد..."):
+            prompt = f"""Write a video script in {lang} for {platform}.
+Topic: {topic}
+Duration: {duration}
+Style: {style}
+Break it into scenes with a storyboard (timestamp + visual + narration)."""
+            with st.spinner("Generating..."):
                 resp = client.chat.completions.create(
                     model="openai/gpt-oss-120b",
                     messages=[{"role": "user", "content": prompt}],
@@ -360,11 +355,11 @@ def render_video():
                 )
             script = resp.choices[0].message.content
             st.markdown(script)
-            st.download_button("⬇️ تحميل MD", script, "script.md", "text/markdown")
+            st.download_button("⬇️ Download MD", script, "script.md", "text/markdown")
         except TreatsError as e:
             st.error(str(e))
         except Exception as e:
-            st.error(f"خطأ: {e}")
+            st.error(f"Error: {e}")
 
 
 # ============================================================
@@ -374,55 +369,53 @@ def render_tts():
     st.header("🔊 Text to Speech")
     voices = fetch_available_voice_ids()
 
-    lang_choice = st.radio("اللغة", ["English", "العربية"], horizontal=True)
+    lang_choice = st.radio("Language", ["English", "Arabic"], horizontal=True)
     voice_pool = voices["en"] if lang_choice == "English" else voices["ar"]
 
     if not voice_pool:
-        st.warning("لا توجد أصوات متاحة حاليًا. حاول لاحقًا.")
+        st.warning("No voices available right now. Please try again later.")
         return
 
-    voice = st.selectbox("الصوت", voice_pool, key="tts_voice")
-    text = st.text_area("النص", height=150)
+    voice = st.selectbox("Voice", voice_pool, key="tts_voice")
+    text = st.text_area("Text", height=150)
     c1, c2, c3 = st.columns(3)
     with c1:
-        rate_val = st.slider("السرعة", 0.5, 2.0, 1.0, 0.1)
+        rate_val = st.slider("Rate", 0.5, 2.0, 1.0, 0.1)
     with c2:
-        pitch_val = st.slider("النبرة (Hz)", -50, 50, 0, 5)
+        pitch_val = st.slider("Pitch (Hz)", -50, 50, 0, 5)
     with c3:
-        vol_val = st.slider("مستوى الصوت", 0, 100, 100, 5)
+        vol_val = st.slider("Volume", 0, 100, 100, 5)
 
     rate = f"{'+' if rate_val >= 1 else ''}{int((rate_val - 1) * 100)}%"
     pitch = f"{'+' if pitch_val >= 0 else ''}{pitch_val}Hz"
     volume = f"+{vol_val}%"
 
-    if st.button("🔊 توليد الصوت"):
+    if st.button("🔊 Generate Audio"):
         if not text.strip():
-            st.warning("اكتب النص.")
+            st.warning("Please enter some text.")
             return
         try:
-            with st.spinner("جاري التوليد..."):
+            with st.spinner("Generating..."):
                 audio = asyncio.run(_tts_generate(text, voice, rate, pitch, volume))
             st.audio(audio, format="audio/mp3")
-            st.download_button("⬇️ تحميل MP3", audio, "treats_tts.mp3", "audio/mpeg")
+            st.download_button("⬇️ Download MP3", audio, "treats_tts.mp3", "audio/mpeg")
         except Exception as e:
-            st.error(f"فشل التوليد: {e}")
+            st.error(f"Generation failed: {e}")
 
 
 # ============================================================
-# TOOL: PHOTO GENERATOR  ⭐ الجديد
+# TOOL: PHOTO GENERATOR
 # ============================================================
 def render_photo():
     st.header("🎨 Photo Generator")
-    st.caption("مدعوم بـ Pollinations AI — مجاني، بدون مفتاح.")
+    st.caption("Powered by Pollinations AI — free, no API key required.")
 
-    # جلب الموديلات ديناميكيًا
-    with st.spinner("جاري جلب الموديلات..."):
+    with st.spinner("Loading models..."):
         models = fetch_image_models()
 
-    # مدخلات
     prompt = st.text_area(
-        "وصف الصورة (Prompt)",
-        placeholder="مثال: قطة تشرب قهوة في مقهى باريسي، إضاءة سينمائية، 4K",
+        "Image Prompt",
+        placeholder="e.g. A cat sipping coffee in a Parisian cafe, cinematic lighting, 4K",
         height=100,
     )
 
@@ -431,14 +424,13 @@ def render_photo():
         model = st.selectbox("Model", models, key="photo_model")
     with c2:
         aspect = st.selectbox(
-            "الأبعاد",
+            "Aspect Ratio",
             ["1:1 (1024×1024)", "16:9 (1344×768)", "9:16 (768×1344)", "4:3 (1152×896)"],
             key="photo_aspect",
         )
     with c3:
-        enhance = st.checkbox("تحسين الـ Prompt تلقائيًا", value=True, key="photo_enhance")
+        enhance = st.checkbox("Auto-enhance prompt", value=True, key="photo_enhance")
 
-    # تحويل الأبعاد
     dims = {
         "1:1 (1024×1024)": (1024, 1024),
         "16:9 (1344×768)": (1344, 768),
@@ -447,25 +439,23 @@ def render_photo():
     }
     w, h = dims[aspect]
 
-    # Seed
     c1, c2 = st.columns([3, 1])
     with c1:
-        seed = st.number_input("Seed (اترك 0 لعشوائي)", min_value=0, value=0, step=1, key="photo_seed")
+        seed = st.number_input("Seed (0 = random)", min_value=0, value=0, step=1, key="photo_seed")
     with c2:
-        randomize = st.button("🎲 عشوائي", key="photo_random")
+        randomize = st.button("🎲 Random", key="photo_random")
         if randomize:
             st.session_state["photo_seed"] = random.randint(1, 999999)
             st.rerun()
 
     use_seed = int(seed) if seed > 0 else None
 
-    # توليد
     if st.button("🎨 Generate Image", type="primary", key="photo_gen"):
         if not prompt.strip():
-            st.warning("اكتب وصف الصورة.")
+            st.warning("Please enter an image prompt.")
             return
         try:
-            with st.spinner("جاري توليد الصورة... (قد يستغرق 10-30 ثانية)"):
+            with st.spinner("Generating image... (10–30 seconds)"):
                 img_bytes = generate_image(
                     prompt=prompt,
                     width=w,
@@ -479,23 +469,21 @@ def render_photo():
         except TreatsError as e:
             st.error(str(e))
         except Exception as e:
-            st.error(f"خطأ غير متوقع: {e}")
+            st.error(f"Unexpected error: {e}")
 
-    # عرض آخر صورة
     if "last_image" in st.session_state:
         st.divider()
         st.image(st.session_state["last_image"], caption=st.session_state.get("last_prompt", ""))
         st.download_button(
-            "⬇️ تحميل PNG",
+            "⬇️ Download PNG",
             data=st.session_state["last_image"],
             file_name=f"treats_photo_{datetime.now():%Y%m%d_%H%M%S}.png",
             mime="image/png",
         )
         if st.button("🔄 Regenerate", key="photo_regen"):
-            # seed جديد
             new_seed = random.randint(1, 999999)
             try:
-                with st.spinner("جاري التوليد من جديد..."):
+                with st.spinner("Regenerating..."):
                     img_bytes = generate_image(
                         prompt=st.session_state["last_prompt"],
                         width=w,
