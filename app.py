@@ -63,27 +63,36 @@ def load_css():
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         }
 
-        /* ---------- HIDE STREAMLIT CHROME (keep sidebar toggle) ---------- */
+        /* ---------- HIDE ONLY THE NOISY CHROME (keep sidebar toggle) ---------- */
         #MainMenu { visibility: hidden !important; }
         footer { visibility: hidden !important; }
         [data-testid="stDecoration"] { display: none !important; }
-        [data-testid="stToolbar"] { display: none !important; }
-        [data-testid="stMainMenu"] { display: none !important; }
         [data-testid="stStatusWidget"] { display: none !important; }
-        [data-testid="stToolbarActions"] { display: none !important; }
         [data-testid="stAppDeployButton"] { display: none !important; }
+        [data-testid="stMainMenu"] { display: none !important; }
+        [data-testid="stToolbarActions"] { display: none !important; }
 
         header[data-testid="stHeader"] {
             background: transparent !important;
             box-shadow: none !important;
         }
 
-        /* Ensure sidebar toggle stays visible and functional */
+        /* ---------- KEEP SIDEBAR TOGGLE ALWAYS VISIBLE + PURPLE ---------- */
         [data-testid="stSidebarCollapsedControl"],
+        [data-testid="stSidebarCollapseButton"],
         [data-testid="collapsedControl"] {
             display: flex !important;
             visibility: visible !important;
             opacity: 1 !important;
+            color: #6c3ef5 !important;
+            z-index: 999999 !important;
+        }
+
+        [data-testid="stSidebarCollapsedControl"] svg,
+        [data-testid="stSidebarCollapseButton"] svg,
+        [data-testid="collapsedControl"] svg {
+            color: #6c3ef5 !important;
+            fill: #6c3ef5 !important;
         }
 
         .stApp {
@@ -178,7 +187,6 @@ def load_css():
             margin-top: 8px;
         }
 
-        /* Radio group */
         [data-testid="stSidebar"] [data-testid="stRadio"] > div[role="radiogroup"] {
             gap: 3px !important;
             display: flex;
@@ -260,7 +268,6 @@ def load_css():
             display: none !important;
         }
 
-        /* Sidebar model selectbox */
         [data-testid="stSidebar"] [data-testid="stSelectbox"] > label {
             font-size: 11px !important;
             font-weight: 700 !important;
