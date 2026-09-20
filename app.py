@@ -7,6 +7,7 @@ import io
 import base64
 from urllib.parse import quote
 from datetime import datetime
+import streamlit.components.v1 as components
 
 # ============================================================
 # PAGE CONFIG
@@ -19,7 +20,73 @@ st.set_page_config(
 )
 
 # ============================================================
-# INLINE SVG LOGO  (no file needed)
+# JAVASCRIPT HAMBURGER — forces a visible 3-line button
+# ============================================================
+components.html("""
+<script>
+(function() {
+    const doc = window.parent.document;
+
+    const SVG_HAMBURGER = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6c3ef5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="7" x2="21" y2="7"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="17" x2="21" y2="17"></line></svg>';
+
+    const STYLE = 'display:flex !important;visibility:visible !important;opacity:1 !important;position:fixed !important;top:12px !important;left:12px !important;width:48px !important;height:48px !important;min-width:48px !important;min-height:48px !important;padding:0 !important;margin:0 !important;background:#ffffff !important;border:2px solid #6c3ef5 !important;border-radius:12px !important;box-shadow:0 4px 16px rgba(108,62,245,0.4) !important;z-index:2147483647 !important;cursor:pointer !important;align-items:center !important;justify-content:center !important;overflow:visible !important;transform:none !important;';
+
+    const SELECTORS = [
+        '[data-testid="collapsedControl"]',
+        '[data-testid="stSidebarCollapsedControl"]',
+        '[data-testid="stExpandSidebarButton"]',
+        '[data-testid="stSidebarNavCollapseButton"]',
+        'button[kind="headerNoPadding"]',
+        'button[kind="header"]'
+    ];
+
+    function applyStyles() {
+        let found = false;
+
+        SELECTORS.forEach(function(sel) {
+            const els = doc.querySelectorAll(sel);
+            els.forEach(function(el) {
+                found = true;
+                el.style.cssText = STYLE;
+                if (!el.getAttribute('data-treats-done')) {
+                    el.setAttribute('data-treats-done', '1');
+                    el.innerHTML = SVG_HAMBURGER;
+                }
+            });
+        });
+
+        if (!found) {
+            if (!doc.getElementById('treats-hamburger')) {
+                const btn = doc.createElement('button');
+                btn.id = 'treats-hamburger';
+                btn.innerHTML = SVG_HAMBURGER;
+                btn.style.cssText = STYLE;
+                btn.onclick = function() {
+                    const realToggle = doc.querySelector('[data-testid="stSidebarCollapsedControl"] button, [data-testid="stExpandSidebarButton"]');
+                    if (realToggle) {
+                        realToggle.click();
+                    } else {
+                        const sidebar = doc.querySelector('[data-testid="stSidebar"]');
+                        if (sidebar) {
+                            const isCollapsed = sidebar.getAttribute('aria-expanded') === 'false';
+                            sidebar.setAttribute('aria-expanded', isCollapsed ? 'true' : 'false');
+                        }
+                    }
+                };
+                doc.body.appendChild(btn);
+            }
+        }
+    }
+
+    applyStyles();
+    new MutationObserver(applyStyles).observe(doc.body, { childList: true, subtree: true });
+    setInterval(applyStyles, 800);
+})();
+</script>
+""", height=0)
+
+# ============================================================
+# INLINE SVG LOGO
 # ============================================================
 LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
   <defs>
@@ -69,81 +136,6 @@ def load_css():
         [data-testid="stToolbar"] { display: none; }
         [data-testid="stDecoration"] { display: none; }
 
-        /* ============================================================
-           SIDEBAR TOGGLE — 3 LINES, VERY VISIBLE
-           ============================================================ */
-        [data-testid="collapsedControl"],
-        [data-testid="stSidebarCollapsedControl"],
-        [data-testid="stExpandSidebarButton"],
-        [data-testid="stSidebarNavCollapseButton"],
-        button[kind="headerNoPadding"],
-        button[kind="header"] {
-            display: flex !important;
-            visibility: visible !important;
-            opacity: 1 !important;
-            position: fixed !important;
-            top: 12px !important;
-            left: 12px !important;
-            width: 48px !important;
-            height: 48px !important;
-            min-width: 48px !important;
-            min-height: 48px !important;
-            max-width: 48px !important;
-            max-height: 48px !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            background-color: #ffffff !important;
-            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236c3ef5' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><line x1='4' y1='7' x2='20' y2='7'/><line x1='4' y1='12' x2='20' y2='12'/><line x1='4' y1='17' x2='20' y2='17'/></svg>") !important;
-            background-repeat: no-repeat !important;
-            background-position: center center !important;
-            background-size: 26px 26px !important;
-            border: 2px solid #6c3ef5 !important;
-            border-radius: 12px !important;
-            box-shadow: 0 4px 16px rgba(108, 62, 245, 0.4) !important;
-            z-index: 2147483647 !important;
-            cursor: pointer !important;
-            transition: all 0.15s ease !important;
-            align-items: center !important;
-            justify-content: center !important;
-            text-indent: -9999px !important;
-            overflow: hidden !important;
-            font-size: 0 !important;
-        }
-
-        /* Hide the default Streamlit icon so our 3 lines show */
-        [data-testid="collapsedControl"] svg,
-        [data-testid="stSidebarCollapsedControl"] svg,
-        [data-testid="stExpandSidebarButton"] svg,
-        [data-testid="stSidebarNavCollapseButton"] svg,
-        [data-testid="collapsedControl"] span,
-        [data-testid="stSidebarCollapsedControl"] span,
-        [data-testid="stExpandSidebarButton"] span,
-        [data-testid="stSidebarNavCollapseButton"] span {
-            display: none !important;
-            visibility: hidden !important;
-            opacity: 0 !important;
-            width: 0 !important;
-            height: 0 !important;
-            font-size: 0 !important;
-        }
-
-        /* Hover effect */
-        [data-testid="collapsedControl"]:hover,
-        [data-testid="stSidebarCollapsedControl"]:hover,
-        [data-testid="stExpandSidebarButton"]:hover {
-            background-color: #f5f3ff !important;
-            border-color: #a855f7 !important;
-            transform: scale(1.08);
-            box-shadow: 0 6px 22px rgba(108, 62, 245, 0.55) !important;
-        }
-
-        /* Active press effect */
-        [data-testid="collapsedControl"]:active,
-        [data-testid="stSidebarCollapsedControl"]:active {
-            transform: scale(0.92);
-        }
-
-        /* Make sure header doesn't cover our button */
         header[data-testid="stHeader"] {
             background: transparent !important;
             z-index: 1 !important;
@@ -156,7 +148,7 @@ def load_css():
         }
 
         /* ============================================================
-           MOBILE TOUCH FIX — prevent accidental text drag
+           MOBILE TOUCH FIX
            ============================================================ */
         * {
             -webkit-tap-highlight-color: transparent;
@@ -339,7 +331,6 @@ def load_css():
             margin: 0 auto;
         }
 
-        /* ---------- TYPOGRAPHY ---------- */
         h1 {
             font-size: 30px !important;
             font-weight: 800 !important;
@@ -396,7 +387,6 @@ def load_css():
         .theme-tts    .icon { background: linear-gradient(135deg, #fce7f3, #fbcfe8); }
         .theme-photo  .icon { background: linear-gradient(135deg, #ede9fe, #ddd6fe); }
 
-        /* ---------- BUTTONS ---------- */
         .stButton > button {
             background: #ffffff;
             color: #1f2937;
@@ -441,7 +431,6 @@ def load_css():
             color: #6c3ef5;
         }
 
-        /* ---------- INPUTS ---------- */
         .stTextInput input,
         .stTextArea textarea,
         .stNumberInput input,
@@ -464,7 +453,6 @@ def load_css():
             line-height: 1.6 !important;
         }
 
-        /* ---------- FORM ---------- */
         [data-testid="stForm"] {
             border: 1px solid #f3f4f6;
             border-radius: 16px;
@@ -473,7 +461,6 @@ def load_css():
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
         }
 
-        /* ---------- CHAT MESSAGES ---------- */
         [data-testid="stChatMessage"] {
             background: transparent;
             padding: 20px 0;
@@ -484,7 +471,6 @@ def load_css():
             border-bottom: none;
         }
 
-        /* ---------- CHAT INPUT ---------- */
         [data-testid="stChatInput"] {
             border-radius: 14px;
             border: 1px solid #e5e7eb;
@@ -497,7 +483,6 @@ def load_css():
             box-shadow: 0 4px 20px rgba(168, 85, 247, 0.15);
         }
 
-        /* ---------- MISC ---------- */
         code {
             background: #faf5ff !important;
             color: #7c3aed !important;
@@ -522,7 +507,6 @@ def load_css():
             font-size: 13px;
         }
 
-        /* ---------- HERO ---------- */
         .treats-hero {
             text-align: center;
             padding: 30px 20px 20px 20px;
@@ -555,7 +539,6 @@ def load_css():
             margin: 0;
         }
 
-        /* ---------- STARTER CARDS ---------- */
         .starter-card .stButton > button {
             width: 100%;
             text-align: left;
@@ -578,7 +561,6 @@ def load_css():
             color: #6c3ef5;
         }
 
-        /* ---------- Expander ---------- */
         details {
             border: 1px solid #f3f4f6;
             border-radius: 12px;
@@ -591,25 +573,10 @@ def load_css():
             color: #1f2937;
         }
 
-        /* ---------- RESPONSIVE (mobile) ---------- */
         @media (max-width: 768px) {
             [data-testid="stSidebar"] {
                 min-width: 82vw !important;
                 max-width: 82vw !important;
-            }
-
-            /* Hamburger stays at top-left, slightly bigger for mobile */
-            [data-testid="collapsedControl"],
-            [data-testid="stSidebarCollapsedControl"],
-            [data-testid="stExpandSidebarButton"],
-            [data-testid="stSidebarNavCollapseButton"],
-            button[kind="headerNoPadding"],
-            button[kind="header"] {
-                top: 10px !important;
-                left: 10px !important;
-                width: 48px !important;
-                height: 48px !important;
-                background-size: 26px 26px !important;
             }
 
             .main .block-container,
