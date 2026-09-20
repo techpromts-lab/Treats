@@ -76,7 +76,7 @@ def load_css():
             min-height: 48px;
         }
 
-        /* Style the sidebar toggle (mobile hamburger + desktop arrow) */
+        /* ---------- SIDEBAR TOGGLE (HAMBURGER) ---------- */
         [data-testid="collapsedControl"],
         [data-testid="stSidebarCollapsedControl"] {
             display: flex !important;
@@ -85,11 +85,18 @@ def load_css():
             background: #ffffff !important;
             border: 1px solid #ede9fe !important;
             border-radius: 10px !important;
-            padding: 6px !important;
-            margin: 8px !important;
+            padding: 8px !important;
+            margin: 0 !important;
+            position: fixed !important;
+            top: 12px !important;
+            left: 16px !important;
+            width: 42px !important;
+            height: 42px !important;
+            align-items: center !important;
+            justify-content: center !important;
             box-shadow: 0 2px 10px rgba(108, 62, 245, 0.15) !important;
             transition: all 0.15s ease !important;
-            z-index: 999 !important;
+            z-index: 99999 !important;
         }
         [data-testid="collapsedControl"]:hover,
         [data-testid="stSidebarCollapsedControl"]:hover {
@@ -564,6 +571,16 @@ def load_css():
             [data-testid="stSidebar"] {
                 min-width: 82vw !important;
                 max-width: 82vw !important;
+            }
+
+            /* Hamburger: push it more inside on mobile */
+            [data-testid="collapsedControl"],
+            [data-testid="stSidebarCollapsedControl"] {
+                top: 14px !important;
+                left: 20px !important;
+                width: 44px !important;
+                height: 44px !important;
+                padding: 10px !important;
             }
 
             /* Zoom in: tighter padding, wider content */
