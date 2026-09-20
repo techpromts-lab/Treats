@@ -63,7 +63,7 @@ def load_css():
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         }
 
-        /* ---------- HIDE ONLY THE NOISY CHROME (keep sidebar toggle) ---------- */
+        /* ---------- HIDE NOISY CHROME ---------- */
         #MainMenu { visibility: hidden !important; }
         footer { visibility: hidden !important; }
         [data-testid="stDecoration"] { display: none !important; }
@@ -77,28 +77,45 @@ def load_css():
             box-shadow: none !important;
         }
 
-        /* ---------- KEEP SIDEBAR TOGGLE ALWAYS VISIBLE + PURPLE ---------- */
-        [data-testid="stSidebarCollapsedControl"],
-        [data-testid="stSidebarCollapseButton"],
-        [data-testid="collapsedControl"] {
-            display: flex !important;
-            visibility: visible !important;
-            opacity: 1 !important;
-            color: #6c3ef5 !important;
-            z-index: 999999 !important;
-        }
-
-        [data-testid="stSidebarCollapsedControl"] svg,
-        [data-testid="stSidebarCollapseButton"] svg,
-        [data-testid="collapsedControl"] svg {
-            color: #6c3ef5 !important;
-            fill: #6c3ef5 !important;
-        }
-
         .stApp {
             background: #ffffff;
             -webkit-overflow-scrolling: touch;
             overscroll-behavior-y: contain;
+        }
+
+        /* ============================================================
+           SIDEBAR CLOSE BUTTON — hidden on Desktop/iPad, visible on Mobile
+           ============================================================ */
+        /* Desktop + iPad (>= 769px): hide close button → sidebar can't be closed */
+        @media (min-width: 769px) {
+            [data-testid="stSidebarCollapseButton"],
+            [data-testid="stSidebarCollapsedControl"],
+            [data-testid="collapsedControl"] {
+                display: none !important;
+                visibility: hidden !important;
+                opacity: 0 !important;
+                pointer-events: none !important;
+            }
+        }
+
+        /* Mobile (<= 768px): keep toggle visible in purple */
+        @media (max-width: 768px) {
+            [data-testid="stSidebarCollapseButton"],
+            [data-testid="stSidebarCollapsedControl"],
+            [data-testid="collapsedControl"] {
+                display: flex !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+                color: #6c3ef5 !important;
+                z-index: 999999 !important;
+            }
+
+            [data-testid="stSidebarCollapseButton"] svg,
+            [data-testid="stSidebarCollapsedControl"] svg,
+            [data-testid="collapsedControl"] svg {
+                color: #6c3ef5 !important;
+                fill: #6c3ef5 !important;
+            }
         }
 
         /* ---------- MOBILE TOUCH FIX ---------- */
@@ -297,7 +314,7 @@ def load_css():
         }
 
         /* ============================================================
-           CENTER CHAT WHEN SIDEBAR IS CLOSED (iPad/Tablet fix)
+           MAIN CONTENT — always centered
            ============================================================ */
         section.main,
         [data-testid="stMain"] {
@@ -320,7 +337,7 @@ def load_css():
             padding-right: 1.5rem !important;
         }
 
-        /* Chat input wrapper — centered when sidebar closed */
+        /* Chat input wrapper — centered */
         [data-testid="stChatInput"],
         [data-testid="stChatInputContainer"],
         [data-testid="stBottomBlockContainer"] {
@@ -522,43 +539,47 @@ def load_css():
             font-size: 13px;
         }
 
-        /* ---------- HERO ---------- */
+        /* ============================================================
+           HERO — clean, centered, logo + title only
+           ============================================================ */
         .treats-hero {
-            text-align: center;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 55vh;
-            padding: 20px;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
+            text-align: center !important;
+            min-height: 52vh !important;
+            padding: 20px 16px !important;
+            gap: 0 !important;
         }
+
         .treats-hero .hero-logo {
-            width: 130px;
-            height: 130px;
-            margin: 0 0 28px 0;
-            filter: drop-shadow(0 12px 32px rgba(108, 62, 245, 0.22));
+            width: 140px !important;
+            height: 140px !important;
+            margin: 0 0 28px 0 !important;
+            filter: drop-shadow(0 14px 36px rgba(108, 62, 245, 0.22)) !important;
             animation: float 3s ease-in-out infinite;
-            display: block;
+            display: block !important;
+            object-fit: contain !important;
         }
+
         @keyframes float {
             0%, 100% { transform: translateY(0); }
             50% { transform: translateY(-6px); }
         }
+
         .treats-hero h2 {
-            font-size: 30px;
-            font-weight: 800;
-            color: #111827;
-            margin: 0 0 10px 0;
-            letter-spacing: -0.03em;
-            background: linear-gradient(135deg, #1f2937 0%, #6c3ef5 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        .treats-hero p {
-            color: #6b7280;
-            font-size: 15px;
-            margin: 0;
+            font-size: 34px !important;
+            font-weight: 800 !important;
+            color: #111827 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            letter-spacing: -0.035em !important;
+            line-height: 1.15 !important;
+            background: linear-gradient(135deg, #1f2937 0%, #6c3ef5 100%) !important;
+            -webkit-background-clip: text !important;
+            -webkit-text-fill-color: transparent !important;
+            background-clip: text !important;
         }
 
         /* ---------- Expander ---------- */
@@ -593,14 +614,15 @@ def load_css():
             }
 
             .treats-hero {
-                min-height: 50vh !important;
+                min-height: 48vh !important;
             }
             .treats-hero .hero-logo {
-                width: 110px !important;
-                height: 110px !important;
+                width: 120px !important;
+                height: 120px !important;
+                margin-bottom: 24px !important;
             }
             .treats-hero h2 {
-                font-size: 26px !important;
+                font-size: 28px !important;
             }
         }
 
@@ -628,9 +650,18 @@ def load_css():
             .tool-header .title-block h1 { font-size: 19px !important; }
             .tool-header .title-block p { font-size: 12.5px !important; }
 
-            .treats-hero { min-height: 60vh; padding: 16px 12px; }
-            .treats-hero h2 { font-size: 24px; }
-            .treats-hero .hero-logo { width: 110px; height: 110px; margin-bottom: 22px; }
+            .treats-hero {
+                min-height: 55vh !important;
+                padding: 16px 12px !important;
+            }
+            .treats-hero .hero-logo {
+                width: 110px !important;
+                height: 110px !important;
+                margin-bottom: 22px !important;
+            }
+            .treats-hero h2 {
+                font-size: 26px !important;
+            }
 
             .stButton > button,
             .stDownloadButton > button {
@@ -895,8 +926,7 @@ def render_chat():
         st.markdown(
             f'<div class="treats-hero">'
             f'<img src="{LOGO_URI}" class="hero-logo" alt="Treats">'
-            f'<h2>How can I help you today?</h2>'
-            f'<p>What\'s on your mind today?</p>'
+            f'<h2>How can I help you?</h2>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -1241,4 +1271,4 @@ elif tool == "video":
 elif tool == "tts":
     render_tts()
 elif tool == "photo":
-    render_photo()
+    render_photo()        
