@@ -536,7 +536,7 @@ def load_css():
         }
 
         /* ============================================================
-           HERO — logo + title, PERFECTLY CENTERED
+           HERO — logo only, perfectly centered
            ============================================================ */
         .treats-hero {
             display: flex !important;
@@ -552,9 +552,9 @@ def load_css():
         }
 
         .treats-hero .hero-logo {
-            width: 140px !important;
-            height: 140px !important;
-            margin: 0 auto 28px auto !important;
+            width: 160px !important;
+            height: 160px !important;
+            margin: 0 auto !important;
             padding: 0 !important;
             filter: drop-shadow(0 14px 36px rgba(108, 62, 245, 0.22)) !important;
             animation: float 3s ease-in-out infinite;
@@ -566,23 +566,6 @@ def load_css():
         @keyframes float {
             0%, 100% { transform: translateY(0); }
             50% { transform: translateY(-6px); }
-        }
-
-        .treats-hero h2 {
-            font-size: 34px !important;
-            font-weight: 800 !important;
-            color: #111827 !important;
-            margin: 0 auto !important;
-            padding: 0 !important;
-            letter-spacing: -0.035em !important;
-            line-height: 1.15 !important;
-            text-align: center !important;
-            display: block !important;
-            width: 100% !important;
-            background: linear-gradient(135deg, #1f2937 0%, #6c3ef5 100%) !important;
-            -webkit-background-clip: text !important;
-            -webkit-text-fill-color: transparent !important;
-            background-clip: text !important;
         }
 
         /* ---------- Expander ---------- */
@@ -620,12 +603,8 @@ def load_css():
                 min-height: 48vh !important;
             }
             .treats-hero .hero-logo {
-                width: 120px !important;
-                height: 120px !important;
-                margin-bottom: 24px !important;
-            }
-            .treats-hero h2 {
-                font-size: 28px !important;
+                width: 140px !important;
+                height: 140px !important;
             }
         }
 
@@ -658,12 +637,8 @@ def load_css():
                 padding: 16px 12px !important;
             }
             .treats-hero .hero-logo {
-                width: 110px !important;
-                height: 110px !important;
-                margin-bottom: 22px !important;
-            }
-            .treats-hero h2 {
-                font-size: 26px !important;
+                width: 120px !important;
+                height: 120px !important;
             }
 
             .stButton > button,
@@ -929,7 +904,6 @@ def render_chat():
         st.markdown(
             f'<div class="treats-hero">'
             f'<img src="{LOGO_URI}" class="hero-logo" alt="Treats">'
-            f'<h2>How can I help you?</h2>'
             f'</div>',
             unsafe_allow_html=True,
         )
