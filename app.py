@@ -63,12 +63,11 @@ def load_css():
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         }
 
-        /* Hide only the noisy chrome — keep header so hamburger shows */
+        /* Hide noisy chrome — keep header so hamburger shows */
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
         [data-testid="stDecoration"] { display: none; }
 
-        /* Transparent header so it blends, but stays functional */
         header[data-testid="stHeader"] {
             background: transparent;
             box-shadow: none;
@@ -80,9 +79,7 @@ def load_css():
             overscroll-behavior-y: contain;
         }
 
-        /* ============================================================
-           MOBILE TOUCH FIX
-           ============================================================ */
+        /* ---------- MOBILE TOUCH FIX ---------- */
         * {
             -webkit-tap-highlight-color: transparent;
         }
@@ -96,7 +93,6 @@ def load_css():
         .treats-brand,
         .sidebar-footer,
         .treats-hero,
-        .starter-card,
         [data-testid="stSidebar"] {
             -webkit-user-select: none;
             -moz-user-select: none;
@@ -131,15 +127,15 @@ def load_css():
         [data-testid="stSidebar"] {
             background: linear-gradient(180deg, #faf9ff 0%, #f5f3ff 100%);
             border-right: 1px solid #ede9fe;
-            min-width: 270px !important;
-            max-width: 270px !important;
+            min-width: 280px !important;
+            max-width: 280px !important;
         }
         [data-testid="stSidebar"] > div:first-child {
-            padding: 1.5rem 0.85rem 1rem 0.85rem;
+            padding: 1.5rem 0.9rem 1rem 0.9rem;
         }
 
         .treats-brand {
-            padding: 4px 10px 24px 10px;
+            padding: 4px 10px 22px 10px;
             display: flex;
             align-items: center;
             gap: 12px;
@@ -159,6 +155,18 @@ def load_css():
             background-clip: text;
         }
 
+        /* Sidebar section label */
+        .sidebar-label {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #9ca3af;
+            padding: 8px 14px 6px 14px;
+            margin-top: 8px;
+        }
+
+        /* Radio group */
         [data-testid="stSidebar"] [data-testid="stRadio"] > div[role="radiogroup"] {
             gap: 3px !important;
             display: flex;
@@ -203,6 +211,7 @@ def load_css():
             box-sizing: content-box;
         }
 
+        /* Tool icons */
         label[data-baseweb="radio"]:nth-of-type(1)::before {
             background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>") !important;
             background-color: #eef2ff;
@@ -240,13 +249,29 @@ def load_css():
             display: none !important;
         }
 
+        /* Sidebar model selectbox */
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] > label {
+            font-size: 11px !important;
+            font-weight: 700 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.08em !important;
+            color: #9ca3af !important;
+            padding-left: 2px !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div {
+            background: #ffffff !important;
+            border: 1px solid #ede9fe !important;
+            border-radius: 10px !important;
+            font-size: 13px !important;
+        }
+
         .sidebar-footer {
             padding: 16px 14px;
             color: #8b8b9e;
             font-size: 12px;
             line-height: 1.6;
             border-top: 1px solid #ede9fe;
-            margin-top: 24px;
+            margin-top: 20px;
         }
         .sidebar-footer strong {
             color: #6c3ef5;
@@ -257,7 +282,7 @@ def load_css():
         .main .block-container,
         section.main > div.block-container {
             max-width: 780px;
-            padding-top: 3.5rem;
+            padding-top: 1.5rem;
             padding-bottom: 5rem;
             padding-left: 1.5rem;
             padding-right: 1.5rem;
@@ -320,6 +345,7 @@ def load_css():
         .theme-tts    .icon { background: linear-gradient(135deg, #fce7f3, #fbcfe8); }
         .theme-photo  .icon { background: linear-gradient(135deg, #ede9fe, #ddd6fe); }
 
+        /* ---------- BUTTONS ---------- */
         .stButton > button {
             background: #ffffff;
             color: #1f2937;
@@ -327,7 +353,7 @@ def load_css():
             border-radius: 10px;
             padding: 8px 18px;
             font-weight: 600;
-            font-size: 14pxid;
+            font-size: 14px;
             transition: all 0.15s ease;
             box-shadow: none;
         }
@@ -335,9 +361,9 @@ def load_css():
             background: #f9fafb;
             border-color: #d1d5db;
             color: #111827;
-            transform: translateY(-="1px);
+            transform: translateY(-1px);
         }
-        .stButtonstChatMessage"] > button[kind="primary"] {
+        .stButton > button[kind="primary"] {
             background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%);
             color: #ffffff;
             border: none;
@@ -364,6 +390,7 @@ def load_css():
             color: #6c3ef5;
         }
 
+        /* ---------- INPUTS ---------- */
         .stTextInput input,
         .stTextArea textarea,
         .stNumberInput input,
@@ -386,6 +413,7 @@ def load_css():
             line-height: 1.6 !important;
         }
 
+        /* ---------- FORM ---------- */
         [data-testid="stForm"] {
             border: 1px solid #f3f4f6;
             border-radius: 16px;
@@ -394,7 +422,8 @@ def load_css():
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
         }
 
-        [data-test {
+        /* ---------- CHAT ---------- */
+        [data-testid="stChatMessage"] {
             background: transparent;
             padding: 20px 0;
             border-bottom: 1px solid #f3f4f6;
@@ -416,6 +445,7 @@ def load_css():
             box-shadow: 0 4px 20px rgba(168, 85, 247, 0.15);
         }
 
+        /* ---------- MISC ---------- */
         code {
             background: #faf5ff !important;
             color: #7c3aed !important;
@@ -428,18 +458,13 @@ def load_css():
             background: #1e1b4b !important;
             border-radius: 14px !important;
         }
-        [data-testid="stSlider"] [role="slider"] {
-            background: #6c3ef5 !important;
-        }
-        [data-testid="stSlider"] [data-baseweb="slider"] div[role="progressbar"] {
-            background: linear-gradient(90deg, #6c3ef5, #a855f7) !important;
-        }
         hr { border-color: #f3f4f6; margin: 1.5rem 0; }
         .stCaption, [data-testid="stCaptionContainer"] {
             color: #6b7280;
             font-size: 13px;
         }
 
+        /* ---------- HERO ---------- */
         .treats-hero {
             text-align: center;
             padding: 30px 20px 20px 20px;
@@ -472,28 +497,7 @@ def load_css():
             margin: 0;
         }
 
-        .starter-card .stButton > button {
-            width: 100%;
-            text-align: left;
-            padding: 16px 18px;
-            height: auto;
-            font-size: 13.5px;
-            line-height: 1.5;
-            color: #1f2937;
-            background: linear-gradient(180deg, #ffffff 0%, #fafaff 100%);
-            border: 1px solid #ede9fe;
-            border-radius: 14px;
-            font-weight: 500;
-            transition: all 0.2s ease;
-        }
-        .starter-card .stButton > button:hover {
-            border-color: #a855f7;
-            background: linear-gradient(180deg, #ffffff 0%, #f5f3ff 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(108, 62, 245, 0.12);
-            color: #6c3ef5;
-        }
-
+        /* ---------- Expander ---------- */
         details {
             border: 1px solid #f3f4f6;
             border-radius: 12px;
@@ -506,6 +510,7 @@ def load_css():
             color: #1f2937;
         }
 
+        /* ---------- RESPONSIVE ---------- */
         @media (max-width: 768px) {
             [data-testid="stSidebar"] {
                 min-width: 82vw !important;
@@ -602,7 +607,7 @@ You are friendly, concise, and always ready to help with anything the user asks 
 
 Treats is a multi-tool AI assistant. You know exactly what you can do, and you should tell users about these features when they ask "what can you do" or "what are your features":
 
-1. **Chat** — The conversation you're having right now. Supports streaming responses, temperature control (0.0–1.5), two AI models (gpt-oss-20b for speed, gpt-oss-120b for quality), regenerate responses, copy, and export conversations as Markdown or JSON.
+1. **Chat** — The conversation you're having right now. Supports streaming responses, two AI models (gpt-oss-20b for speed, gpt-oss-120b for quality), regenerate responses, copy, and export conversations as Markdown or JSON.
 
 2. **CV Builder** — Generates professional CVs in seconds. Supports English and Arabic, three tones (Professional, Concise, Academic), and exports as Markdown or Text.
 
@@ -739,7 +744,7 @@ def render_tool_header(theme_key, title, subtitle):
 
 
 # ============================================================
-# SIDEBAR
+# SIDEBAR — Tools + Model
 # ============================================================
 TOOLS = {
     "Chat": "chat",
@@ -751,6 +756,7 @@ TOOLS = {
 }
 
 with st.sidebar:
+    # Brand
     st.markdown(
         f'<div class="treats-brand">'
         f'<img src="{LOGO_URI}" alt="Treats">'
@@ -759,6 +765,8 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
+    # Tools
+    st.markdown('<div class="sidebar-label">Tools</div>', unsafe_allow_html=True)
     choice_label = st.radio(
         "Navigation",
         list(TOOLS.keys()),
@@ -767,6 +775,16 @@ with st.sidebar:
     )
     tool = TOOLS[choice_label]
 
+    # Model selector (moved here)
+    st.markdown('<div class="sidebar-label">AI Model</div>', unsafe_allow_html=True)
+    model = st.selectbox(
+        "AI Model",
+        AVAILABLE_MODELS,
+        key="model",
+        label_visibility="collapsed",
+    )
+
+    # Footer
     st.markdown(
         '<div class="sidebar-footer">'
         '<strong>Treats v2.0</strong><br>'
@@ -783,23 +801,7 @@ def render_chat():
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    if st.session_state.messages:
-        render_tool_header("chat", "Chat", "Conversation with AI")
-        c1, c2, c3 = st.columns([2, 2, 1])
-        with c1:
-            model = st.selectbox("Model", AVAILABLE_MODELS, key="model")
-        with c2:
-            temp = st.slider("Temperature", 0.0, 1.5, 0.7, 0.1, key="temp")
-        with c3:
-            st.markdown("<div style='height: 28px'></div>", unsafe_allow_html=True)
-            if st.button("New chat", key="new_conv", use_container_width=True):
-                st.session_state.messages = []
-                st.rerun()
-        st.markdown("---")
-    else:
-        model = "openai/gpt-oss-120b"
-        temp = 0.7
-
+    # Empty state — hero
     if not st.session_state.messages:
         st.markdown(
             f'<div class="treats-hero">'
@@ -809,22 +811,8 @@ def render_chat():
             f'</div>',
             unsafe_allow_html=True,
         )
-        st.markdown("<div style='height: 20px'></div>", unsafe_allow_html=True)
 
-        starters = [
-            "What can you do?",
-            "Write a professional email requesting time off.",
-            "Give me 5 ideas for a Streamlit project.",
-        ]
-        cols = st.columns(3)
-        for c, s in zip(cols, starters):
-            with c:
-                st.markdown('<div class="starter-card">', unsafe_allow_html=True)
-                if st.button(s, key=f"starter_{s[:14]}", use_container_width=True):
-                    st.session_state.messages.append({"role": "user", "content": s})
-                    st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
-
+    # Render messages
     for i, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -838,36 +826,48 @@ def render_chat():
                         st.session_state.messages = st.session_state.messages[:i]
                         st.rerun()
 
+    # New chat + Export
     if st.session_state.messages:
-        with st.expander("Export conversation"):
-            col1, col2 = st.columns(2)
-            with col1:
-                md = "\n\n".join(f"**{m['role'].capitalize()}:** {m['content']}" for m in st.session_state.messages)
-                st.download_button(
-                    "Download Markdown", data=md,
-                    file_name=f"treats_chat_{datetime.now():%Y%m%d_%H%M}.md",
-                    mime="text/markdown", use_container_width=True,
-                )
-            with col2:
-                st.download_button(
-                    "Download JSON",
-                    data=json.dumps(st.session_state.messages, ensure_ascii=False, indent=2),
-                    file_name=f"treats_chat_{datetime.now():%Y%m%d_%H%M}.json",
-                    mime="application/json", use_container_width=True,
-                )
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            if st.button("New chat", key="new_conv", use_container_width=True):
+                st.session_state.messages = []
+                st.rerun()
+        with c2:
+            with st.expander("Export"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    md = "\n\n".join(f"**{m['role'].capitalize()}:** {m['content']}" for m in st.session_state.messages)
+                    st.download_button(
+                        "Markdown", data=md,
+                        file_name=f"treats_chat_{datetime.now():%Y%m%d_%H%M}.md",
+                        mime="text/markdown", use_container_width=True,
+                    )
+                with col2:
+                    st.download_button(
+                        "JSON",
+                        data=json.dumps(st.session_state.messages, ensure_ascii=False, indent=2),
+                        file_name=f"treats_chat_{datetime.now():%Y%m%d_%H%M}.json",
+                        mime="application/json", use_container_width=True,
+                    )
 
+    # Input
     prompt = st.chat_input("Message Treats...")
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.rerun()
 
+    # Generate
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
         try:
             client = get_client()
             full_messages = [{"role": "system", "content": TREATS_SYSTEM_PROMPT}] + st.session_state.messages
             history = trim_history(full_messages)
             stream = client.chat.completions.create(
-                model=model, messages=history, temperature=temp, stream=True,
+                model=model,
+                messages=history,
+                temperature=0.7,
+                stream=True,
             )
             with st.chat_message("assistant"):
                 placeholder = st.empty()
@@ -1069,7 +1069,7 @@ def render_photo():
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        model = st.selectbox("Model", models, key="photo_model")
+        model_img = st.selectbox("Model", models, key="photo_model")
     with col2:
         aspect = st.selectbox(
             "Aspect Ratio",
@@ -1106,7 +1106,7 @@ def render_photo():
             with st.spinner("Generating image..."):
                 img_bytes = generate_image(
                     prompt=prompt, width=w, height=h,
-                    model=model, seed=use_seed, enhance=enhance,
+                    model=model_img, seed=use_seed, enhance=enhance,
                 )
             st.session_state["last_image"] = img_bytes
             st.session_state["last_prompt"] = prompt
@@ -1133,7 +1133,7 @@ def render_photo():
                     with st.spinner("Regenerating..."):
                         img_bytes = generate_image(
                             prompt=st.session_state["last_prompt"],
-                            width=w, height=h, model=model,
+                            width=w, height=h, model=model_img,
                             seed=new_seed, enhance=enhance,
                         )
                     st.session_state["last_image"] = img_bytes
