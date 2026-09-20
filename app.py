@@ -105,7 +105,65 @@ def load_css():
             height: 20px !important;
         }
 
-        .stApp { background: #ffffff; }
+        .stApp {
+            background: #ffffff;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior-y: contain;
+        }
+
+        /* ============================================================
+           MOBILE TOUCH FIX — prevent accidental text drag
+           ============================================================ */
+        * {
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Disable selection on UI elements (not on text content) */
+        button,
+        .stButton,
+        .stDownloadButton,
+        label,
+        h1, h2, h3, h4, h5, h6,
+        .tool-header,
+        .treats-brand,
+        .sidebar-footer,
+        .treats-hero,
+        .starter-card,
+        [data-testid="stSidebar"],
+        [data-testid="stHeader"],
+        [data-testid="collapsedControl"],
+        [data-testid="stSidebarCollapsedControl"] {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        /* Keep text selectable where it matters */
+        [data-testid="stChatMessage"],
+        [data-testid="stChatMessage"] *,
+        .stMarkdown,
+        .stMarkdown *,
+        .stTextArea textarea,
+        .stTextInput input,
+        pre, code, pre *, code * {
+            -webkit-user-select: text;
+            user-select: text;
+        }
+
+        /* Chat input: allow smooth typing on mobile */
+        [data-testid="stChatInput"] textarea {
+            touch-action: manipulation;
+            -webkit-user-select: text;
+            user-select: text;
+        }
+
+        /* Prevent horizontal scroll on mobile */
+        html, body, .stApp {
+            overflow-x: hidden;
+            max-width: 100vw;
+        }
 
         /* ---------- SIDEBAR ---------- */
         [data-testid="stSidebar"] {
@@ -239,9 +297,11 @@ def load_css():
         /* ---------- MAIN CONTENT ---------- */
         .main .block-container,
         section.main > div.block-container {
-            max-width: 860px;
-            padding-top: 2rem;
-            padding-bottom: 6rem;
+            max-width: 780px;
+            padding-top: 1.5rem;
+            padding-bottom: 5rem;
+            padding-left: 1.5rem;
+            padding-right: 1.5rem;
             margin: 0 auto;
         }
 
@@ -502,23 +562,71 @@ def load_css():
         /* ---------- RESPONSIVE (mobile) ---------- */
         @media (max-width: 768px) {
             [data-testid="stSidebar"] {
-                min-width: 85vw !important;
-                max-width: 85vw !important;
+                min-width: 82vw !important;
+                max-width: 82vw !important;
             }
+
+            /* Zoom in: tighter padding, wider content */
             .main .block-container,
             section.main > div.block-container {
-                padding-left: 1rem;
-                padding-right: 1rem;
-                padding-top: 1rem;
+                padding-left: 0.75rem !important;
+                padding-right: 0.75rem !important;
+                padding-top: 0.75rem !important;
+                padding-bottom: 3rem !important;
+                max-width: 100% !important;
             }
-            h1 { font-size: 24px !important; }
-            .tool-header .title-block h1 { font-size: 20px !important; }
-            .treats-hero h2 { font-size: 24px; }
-            .treats-hero .hero-logo { width: 90px; height: 90px; }
+
+            /* Tighter header on mobile */
+            header[data-testid="stHeader"] {
+                min-height: 40px;
+            }
+
+            /* Typography adjusts for zoomed-in feel */
+            h1 { font-size: 22px !important; }
+            h2 { font-size: 18px !important; }
+            .tool-header { gap: 10px; padding-bottom: 12px; }
+            .tool-header .icon { width: 38px; height: 38px; }
+            .tool-header .icon svg { width: 18px; height: 18px; }
+            .tool-header .title-block h1 { font-size: 19px !important; }
+            .tool-header .title-block p { font-size: 12.5px !important; }
+
+            .treats-hero { padding: 20px 8px 16px 8px; }
+            .treats-hero h2 { font-size: 22px; }
+            .treats-hero .hero-logo { width: 80px; height: 80px; }
+
+            /* Buttons fill width nicely */
             .stButton > button,
             .stDownloadButton > button {
                 font-size: 13px;
-                padding: 8px 14px;
+                padding: 10px 14px;
+                border-radius: 10px;
+            }
+
+            /* Sidebar padding tighter */
+            [data-testid="stSidebar"] > div:first-child {
+                padding: 1rem 0.5rem 0.75rem 0.5rem !important;
+            }
+            .treats-brand { padding: 2px 6px 16px 6px; }
+            .treats-brand img { width: 38px; height: 38px; }
+            .treats-brand .name { font-size: 18px; }
+            .sidebar-footer { padding: 12px 8px; font-size: 11px; }
+
+            /* Chat messages tighter */
+            [data-testid="stChatMessage"] {
+                padding: 14px 0;
+            }
+
+            /* Forms fill screen */
+            [data-testid="stForm"] {
+                padding: 16px 14px;
+                border-radius: 14px;
+            }
+
+            /* Radio items in sidebar tighter */
+            [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
+                padding: 9px 10px !important;
+                font-size: 13.5px !important;
+                gap: 10px !important;
             }
         }
     </style>
@@ -549,6 +657,31 @@ def get_client():
 
 AVAILABLE_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"]
 
+# ============================================================
+# SYSTEM PROMPT — Treats knows its own features
+# ============================================================
+TREATS_SYSTEM_PROMPT = """You are Treats, a helpful, general-purpose AI assistant built with Streamlit and Groq.
+
+You are friendly, concise, and always ready to help with anything the user asks — writing, coding, learning, brainstorming, analysis, translation, and more.
+
+## Your Features
+
+Treats is a multi-tool AI assistant. You know exactly what you can do, and you should tell users about these features when they ask "what can you do" or "what are your features":
+
+1. **Chat** — The conversation you're having right now. Supports streaming responses, temperature control (0.0–1.5), two AI models (gpt-oss-20b for speed, gpt-oss-120b for quality), regenerate responses, copy, and export conversations as Markdown or JSON.
+
+2. **CV Builder** — Generates professional CVs in seconds. Supports English and Arabic, three tones (Professional, Concise, Academic), and exports as Markdown or Text.
+
+3. **Password Generator** — Creates strong, secure passwords. Customizable length (8–64 characters), with optional numbers and symbols.
+
+4. **Video Script** — Generates complete video scripts with scene-by-scene storyboards. Choose duration, style (Educational, Promotional, Storytelling, Entertainment), language, and platform (YouTube, TikTok, Instagram, LinkedIn).
+
+5. **Text to Speech** — Converts text into natural-sounding speech. Multiple voices in English and Arabic, with controls for rate, pitch, and volume. Download as MP3.
+
+6. **Image Generator** — Creates images from text descriptions. Free, no API key required. Multiple models, aspect ratios, seeds for reproducible results, and auto-enhance option.
+
+When users ask about your capabilities, present these features clearly and help them decide what to use. Be warm but professional. Never use emojis in your responses unless the user uses them first."""
+
 
 # ============================================================
 # TRIM HISTORY
@@ -565,7 +698,7 @@ def trim_history(messages, max_tokens=MAX_CONTEXT_TOKENS):
             break
         trimmed.insert(0, msg)
         total += tokens
-    while trimmed and trimmed[0]["role"] != "user":
+    while trimmed and trimmed[0]["role"] == "assistant":
         trimmed.pop(0)
     return trimmed
 
@@ -745,7 +878,7 @@ def render_chat():
         st.markdown("<div style='height: 20px'></div>", unsafe_allow_html=True)
 
         starters = [
-            "Explain vector databases in simple terms.",
+            "What can you do?",
             "Write a professional email requesting time off.",
             "Give me 5 ideas for a Streamlit project.",
         ]
@@ -797,7 +930,8 @@ def render_chat():
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
         try:
             client = get_client()
-            history = trim_history(st.session_state.messages)
+            full_messages = [{"role": "system", "content": TREATS_SYSTEM_PROMPT}] + st.session_state.messages
+            history = trim_history(full_messages)
             stream = client.chat.completions.create(
                 model=model, messages=history, temperature=temp, stream=True,
             )
