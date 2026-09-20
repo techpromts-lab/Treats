@@ -4,6 +4,7 @@ import json
 import random
 import asyncio
 import io
+import base64
 from urllib.parse import quote
 from datetime import datetime
 
@@ -12,334 +13,480 @@ from datetime import datetime
 # ============================================================
 st.set_page_config(
     page_title="Treats",
-    page_icon=None,
+    page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 # ============================================================
-# CUSTOM CSS  —  ChatGPT-inspired professional UI
+# INLINE SVG LOGO  (no file needed)
+# ============================================================
+LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <defs>
+    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#6c3ef5"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#312e81"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="42" cy="22" rx="14" ry="10" fill="url(#g1)"/>
+  <ellipse cx="78" cy="22" rx="14" ry="10" fill="url(#g1)"/>
+  <ellipse cx="42" cy="22" rx="6" ry="4" fill="#fff"/>
+  <ellipse cx="78" cy="22" rx="6" ry="4" fill="#fff"/>
+  <circle cx="14" cy="70" r="12" fill="url(#g1)"/>
+  <circle cx="106" cy="70" r="12" fill="url(#g1)"/>
+  <rect x="20" y="35" width="80" height="70" rx="30" fill="#f5f3ff"/>
+  <rect x="28" y="43" width="64" height="54" rx="24" fill="url(#g2)"/>
+  <path d="M42 62 Q46 57 50 62" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M70 62 Q74 57 78 62" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M52 74 Q60 81 68 74" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <circle cx="102" cy="40" r="3.5" fill="#fbbf24"/>
+  <circle cx="110" cy="52" r="2.5" fill="#fbbf24"/>
+  <circle cx="96" cy="55" r="2" fill="#fbbf24"/>
+</svg>"""
+
+LOGO_URI = "data:image/svg+xml;base64," + base64.b64encode(LOGO_SVG.encode()).decode()
+
+
+# ============================================================
+# CUSTOM CSS
 # ============================================================
 def load_css():
     st.markdown("""
     <style>
-        /* ---------- Fonts ---------- */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
         html, body, [class*="css"] {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         }
 
-        /* ---------- Hide Streamlit branding ---------- */
+        /* Hide Streamlit chrome */
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
-        header[data-testid="stHeader"] {
-            background: transparent;
-            height: 0;
-        }
+        header[data-testid="stHeader"] { background: transparent; height: 0; }
         [data-testid="stToolbar"] { display: none; }
         [data-testid="stDecoration"] { display: none; }
 
-        /* ---------- App background ---------- */
-        .stApp {
-            background: #ffffff;
-        }
+        .stApp { background: #ffffff; }
 
-        /* ---------- Sidebar ---------- */
+        /* ---------- SIDEBAR ---------- */
         [data-testid="stSidebar"] {
-            background: #f9f9f9;
-            border-right: 1px solid #ececec;
+            background: linear-gradient(180deg, #faf9ff 0%, #f5f3ff 100%);
+            border-right: 1px solid #ede9fe;
+            min-width: 270px !important;
+            max-width: 270px !important;
         }
         [data-testid="stSidebar"] > div:first-child {
-            padding-top: 1rem;
+            padding: 1.5rem 0.85rem 1rem 0.85rem;
         }
 
-        /* Sidebar brand */
         .treats-brand {
+            padding: 4px 10px 24px 10px;
             display: flex;
             align-items: center;
-            gap: 10px;
-            padding: 8px 14px 20px 14px;
-            font-size: 18px;
+            gap: 12px;
+        }
+        .treats-brand img {
+            width: 44px;
+            height: 44px;
+            filter: drop-shadow(0 4px 12px rgba(108, 62, 245, 0.25));
+        }
+        .treats-brand .name {
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Radio group */
+        [data-testid="stSidebar"] [data-testid="stRadio"] > div[role="radiogroup"] {
+            gap: 3px !important;
+            display: flex;
+            flex-direction: column;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
+            display: flex !important;
+            align-items: center !important;
+            gap: 12px !important;
+            padding: 10px 14px !important;
+            margin: 0 !important;
+            border-radius: 10px !important;
+            cursor: pointer !important;
+            transition: all 0.15s ease !important;
+            font-size: 14px !important;
+            font-weight: 500 !important;
+            color: #374151 !important;
+            width: 100% !important;
+            background: transparent !important;
+            border: 1px solid transparent !important;
+            line-height: 1.3 !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:hover {
+            background: #ffffff !important;
+            border-color: #ede9fe !important;
+            transform: translateX(2px);
+        }
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {
+            display: none !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]::before {
+            content: '' !important;
+            width: 20px !important;
+            height: 20px !important;
+            flex-shrink: 0 !important;
+            background-repeat: no-repeat !important;
+            background-position: center !important;
+            background-size: 20px 20px !important;
+            border-radius: 6px;
+            padding: 4px;
+            box-sizing: content-box;
+        }
+
+        /* Colored icons per tool */
+        label[data-baseweb="radio"]:nth-of-type(1)::before {
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>") !important;
+            background-color: #eef2ff;
+        }
+        label[data-baseweb="radio"]:nth-of-type(2)::before {
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/><polyline points='14 2 14 8 20 8'/><line x1='9' y1='13' x2='15' y2='13'/><line x1='9' y1='17' x2='13' y2='17'/></svg>") !important;
+            background-color: #dbeafe;
+        }
+        label[data-baseweb="radio"]:nth-of-type(3)::before {
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2310b981' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='11' width='18' height='11' rx='2' ry='2'/><path d='M7 11V7a5 5 0 0 1 10 0v4'/></svg>") !important;
+            background-color: #d1fae5;
+        }
+        label[data-baseweb="radio"]:nth-of-type(4)::before {
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f97316' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><polygon points='23 7 16 12 23 17 23 7'/><rect x='1' y='5' width='15' height='14' rx='2' ry='2'/></svg>") !important;
+            background-color: #ffedd5;
+        }
+        label[data-baseweb="radio"]:nth-of-type(5)::before {
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ec4899' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><polygon points='11 5 6 9 2 9 2 15 6 15 11 19 11 5'/><path d='M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07'/></svg>") !important;
+            background-color: #fce7f3;
+        }
+        label[data-baseweb="radio"]:nth-of-type(6)::before {
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b5cf6' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='18' height='18' rx='2' ry='2'/><circle cx='8.5' cy='8.5' r='1.5'/><polyline points='21 15 16 10 5 21'/></svg>") !important;
+            background-color: #ede9fe;
+        }
+
+        /* Active item */
+        label[data-baseweb="radio"]:has(input:checked) {
+            background: #ffffff !important;
+            border-color: #ddd6fe !important;
+            font-weight: 700 !important;
+            color: #1f2937 !important;
+            box-shadow: 0 2px 8px rgba(108, 62, 245, 0.08);
+        }
+
+        [data-testid="stSidebar"] [data-testid="stRadio"] > label:first-child {
+            display: none !important;
+        }
+
+        .sidebar-footer {
+            padding: 16px 14px;
+            color: #8b8b9e;
+            font-size: 12px;
+            line-height: 1.6;
+            border-top: 1px solid #ede9fe;
+            margin-top: 24px;
+        }
+        .sidebar-footer strong {
+            color: #6c3ef5;
             font-weight: 600;
-            color: #0d0d0d;
-            letter-spacing: -0.01em;
-        }
-        .treats-brand .dot {
-            width: 26px;
-            height: 26px;
-            background: #10a37f;
-            border-radius: 50%;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: 700;
-            font-size: 13px;
         }
 
-        /* Sidebar nav buttons (radio) */
-        [data-testid="stSidebar"] [role="radiogroup"] {
-            gap: 2px;
-        }
-        [data-testid="stSidebar"] [role="radiogroup"] > label {
-            display: flex;
-            align-items: center;
-            padding: 8px 12px;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: background 0.12s ease;
-            font-size: 14px;
-            color: #0d0d0d;
-            margin: 0;
-        }
-        [data-testid="stSidebar"] [role="radiogroup"] > label:hover {
-            background: #ececec;
-        }
-        [data-testid="stSidebar"] [role="radiogroup"] > label > div:first-child {
-            display: none; /* hide default radio circle */
-        }
-        [data-testid="stSidebar"] [role="radiogroup"] > label[data-checked="true"],
-        [data-testid="stSidebar"] [role="radiogroup"] > label:has(input:checked) {
-            background: #e8e8e8;
-            font-weight: 500;
-        }
-
-        /* ---------- Main content: ChatGPT-like centering ---------- */
+        /* ---------- MAIN CONTENT ---------- */
         .main .block-container,
         section.main > div.block-container {
-            max-width: 820px;
+            max-width: 860px;
             padding-top: 2rem;
             padding-bottom: 6rem;
             margin: 0 auto;
         }
 
-        /* ---------- Typography ---------- */
+        /* ---------- TYPOGRAPHY ---------- */
         h1 {
-            font-size: 28px !important;
-            font-weight: 600 !important;
-            letter-spacing: -0.02em !important;
-            color: #0d0d0d !important;
-            margin-bottom: 1.2rem !important;
+            font-size: 30px !important;
+            font-weight: 800 !important;
+            letter-spacing: -0.03em !important;
+            color: #111827 !important;
+            margin-bottom: 0.4rem !important;
         }
         h2 {
             font-size: 22px !important;
-            font-weight: 600 !important;
-            letter-spacing: -0.01em !important;
-        }
-        h3 {
-            font-size: 17px !important;
-            font-weight: 600 !important;
+            font-weight: 700 !important;
+            letter-spacing: -0.02em !important;
         }
         p, li, label, .stMarkdown {
             font-size: 15px;
             line-height: 1.65;
-            color: #0d0d0d;
+            color: #1f2937;
         }
 
-        /* ---------- Buttons ---------- */
+        /* Colored tool headings */
+        .tool-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 6px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .tool-header .icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .tool-header .icon svg {
+            width: 22px;
+            height: 22px;
+        }
+        .tool-header .title-block h1 {
+            margin: 0 !important;
+            font-size: 26px !important;
+        }
+        .tool-header .title-block p {
+            margin: 2px 0 0 0 !important;
+            color: #6b7280;
+            font-size: 14px !important;
+        }
+
+        /* Per-tool color themes */
+        .theme-chat   .icon { background: linear-gradient(135deg, #eef2ff, #e0e7ff); }
+        .theme-cv     .icon { background: linear-gradient(135deg, #dbeafe, #bfdbfe); }
+        .theme-pass   .icon { background: linear-gradient(135deg, #d1fae5, #a7f3d0); }
+        .theme-video  .icon { background: linear-gradient(135deg, #ffedd5, #fed7aa); }
+        .theme-tts    .icon { background: linear-gradient(135deg, #fce7f3, #fbcfe8); }
+        .theme-photo  .icon { background: linear-gradient(135deg, #ede9fe, #ddd6fe); }
+
+        /* ---------- BUTTONS ---------- */
         .stButton > button {
             background: #ffffff;
-            color: #0d0d0d;
-            border: 1px solid #d9d9e3;
+            color: #1f2937;
+            border: 1px solid #e5e7eb;
             border-radius: 10px;
-            padding: 8px 16px;
-            font-weight: 500;
+            padding: 8px 18px;
+            font-weight: 600;
             font-size: 14px;
-            transition: all 0.12s ease;
+            transition: all 0.15s ease;
             box-shadow: none;
         }
         .stButton > button:hover {
-            background: #f7f7f8;
-            border-color: #b4b4bb;
-            color: #0d0d0d;
+            background: #f9fafb;
+            border-color: #d1d5db;
+            color: #111827;
+            transform: translateY(-1px);
         }
         .stButton > button[kind="primary"] {
-            background: #0d0d0d;
+            background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%);
             color: #ffffff;
-            border: 1px solid #0d0d0d;
+            border: none;
+            box-shadow: 0 4px 14px rgba(108, 62, 245, 0.3);
         }
         .stButton > button[kind="primary"]:hover {
-            background: #2d2d2d;
-            border-color: #2d2d2d;
+            background: linear-gradient(135deg, #5a2ee0 0%, #9333ea 100%);
+            box-shadow: 0 6px 20px rgba(108, 62, 245, 0.4);
+            transform: translateY(-1px);
         }
         .stDownloadButton > button {
             background: #ffffff;
-            color: #0d0d0d;
-            border: 1px solid #d9d9e3;
+            color: #1f2937;
+            border: 1px solid #e5e7eb;
             border-radius: 10px;
-            padding: 8px 16px;
-            font-weight: 500;
+            padding: 8px 18px;
+            font-weight: 600;
             font-size: 14px;
+            transition: all 0.15s ease;
         }
         .stDownloadButton > button:hover {
-            background: #f7f7f8;
-            border-color: #b4b4bb;
+            background: #f9fafb;
+            border-color: #a855f7;
+            color: #6c3ef5;
         }
 
-        /* ---------- Inputs ---------- */
+        /* ---------- INPUTS ---------- */
         .stTextInput input,
         .stTextArea textarea,
         .stNumberInput input,
         .stSelectbox > div > div {
             border-radius: 10px !important;
-            border-color: #d9d9e3 !important;
+            border-color: #e5e7eb !important;
             font-size: 14px !important;
             background: #ffffff !important;
+            transition: all 0.15s ease !important;
         }
         .stTextInput input:focus,
         .stTextArea textarea:focus,
-        .stNumberInput input:focus {
-            border-color: #10a37f !important;
-            box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15) !important;
+        .stNumberInput input:focus,
+        .stSelectbox > div > div:focus-within {
+            border-color: #a855f7 !important;
+            box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.12) !important;
         }
         .stTextArea textarea {
             padding: 12px 14px !important;
             line-height: 1.6 !important;
         }
 
-        /* ---------- Form ---------- */
+        /* ---------- FORM ---------- */
         [data-testid="stForm"] {
-            border: 1px solid #ececec;
-            border-radius: 14px;
-            padding: 20px 22px;
-            background: #fafafa;
+            border: 1px solid #f3f4f6;
+            border-radius: 16px;
+            padding: 22px 24px;
+            background: linear-gradient(180deg, #fefeff 0%, #fafaff 100%);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
         }
 
-        /* ---------- Chat messages (ChatGPT style) ---------- */
+        /* ---------- CHAT MESSAGES ---------- */
         [data-testid="stChatMessage"] {
             background: transparent;
             padding: 20px 0;
-            border-bottom: 1px solid #f0f0f0;
+            border-bottom: 1px solid #f3f4f6;
             border-radius: 0;
         }
         [data-testid="stChatMessage"]:last-child {
             border-bottom: none;
         }
-        [data-testid="stChatMessage"] [data-testid="stChatMessageAvatarUser"],
-        [data-testid="stChatMessage"] [data-testid="stChatMessageAvatarAssistant"] {
-            background: #0d0d0d;
-            color: white;
-        }
 
-        /* ---------- Chat input (bottom) ---------- */
+        /* ---------- CHAT INPUT ---------- */
         [data-testid="stChatInput"] {
             border-radius: 14px;
-            border: 1px solid #d9d9e3;
+            border: 1px solid #e5e7eb;
             background: #ffffff;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+            box-shadow: 0 4px 16px rgba(108, 62, 245, 0.06);
+            transition: all 0.15s ease;
         }
         [data-testid="stChatInput"]:focus-within {
-            border-color: #10a37f;
-            box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.12);
+            border-color: #a855f7;
+            box-shadow: 0 4px 20px rgba(168, 85, 247, 0.15);
         }
 
-        /* ---------- Expander ---------- */
-        .streamlit-expanderHeader {
-            font-size: 14px;
-            font-weight: 500;
-        }
-        details {
-            border: 1px solid #ececec;
-            border-radius: 10px;
-            padding: 4px 12px;
-        }
-
-        /* ---------- Code blocks ---------- */
+        /* ---------- MISC ---------- */
         code {
-            background: #f7f7f8 !important;
-            color: #d6336c !important;
-            padding: 2px 6px !important;
-            border-radius: 4px !important;
+            background: #faf5ff !important;
+            color: #7c3aed !important;
+            padding: 3px 8px !important;
+            border-radius: 6px !important;
             font-size: 13px !important;
+            font-weight: 600;
         }
         pre {
-            background: #0d0d0d !important;
-            border-radius: 12px !important;
+            background: #1e1b4b !important;
+            border-radius: 14px !important;
         }
-
-        /* ---------- Slider ---------- */
         [data-testid="stSlider"] [role="slider"] {
-            background: #10a37f !important;
+            background: #6c3ef5 !important;
         }
-
-        /* ---------- Tabs ---------- */
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 4px;
-            border-bottom: 1px solid #ececec;
+        [data-testid="stSlider"] [data-baseweb="slider"] div[role="progressbar"] {
+            background: linear-gradient(90deg, #6c3ef5, #a855f7) !important;
         }
-        .stTabs [data-baseweb="tab"] {
-            font-size: 14px;
-            font-weight: 500;
-            padding: 10px 16px;
-            color: #6e6e80;
-        }
-        .stTabs [aria-selected="true"] {
-            color: #0d0d0d !important;
-        }
-
-        /* ---------- Dividers ---------- */
-        hr {
-            border-color: #ececec;
-            margin: 1.5rem 0;
-        }
-
-        /* ---------- Caption ---------- */
+        hr { border-color: #f3f4f6; margin: 1.5rem 0; }
         .stCaption, [data-testid="stCaptionContainer"] {
-            color: #6e6e80;
+            color: #6b7280;
             font-size: 13px;
         }
 
-        /* ---------- Toast ---------- */
-        [data-testid="stToast"] {
-            border-radius: 10px;
-        }
-
-        /* ---------- Hide the empty sidebar collapse button styling ---------- */
-        [data-testid="collapsedControl"] {
-            color: #0d0d0d;
-        }
-
-        /* ---------- Empty-state hero ---------- */
+        /* ---------- HERO ---------- */
         .treats-hero {
             text-align: center;
-            padding: 60px 20px 40px 20px;
+            padding: 30px 20px 20px 20px;
         }
-        .treats-hero .logo {
-            width: 52px;
-            height: 52px;
-            background: #10a37f;
-            border-radius: 50%;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: 700;
-            font-size: 22px;
-            margin-bottom: 18px;
+        .treats-hero .hero-logo {
+            width: 120px;
+            height: 120px;
+            margin: 0 auto 16px auto;
+            filter: drop-shadow(0 12px 32px rgba(108, 62, 245, 0.25));
+            animation: float 3s ease-in-out infinite;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
         }
         .treats-hero h2 {
-            font-size: 26px;
-            font-weight: 600;
-            color: #0d0d0d;
-            margin: 0 0 8px 0;
-            letter-spacing: -0.02em;
+            font-size: 30px;
+            font-weight: 800;
+            color: #111827;
+            margin: 0 0 10px 0;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, #1f2937 0%, #6c3ef5 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
         .treats-hero p {
-            color: #6e6e80;
+            color: #6b7280;
             font-size: 15px;
             margin: 0;
         }
 
-        /* ---------- Starter cards ---------- */
+        /* ---------- STARTER CARDS ---------- */
         .starter-card .stButton > button {
             width: 100%;
             text-align: left;
-            padding: 14px 16px;
+            padding: 16px 18px;
             height: auto;
             font-size: 13.5px;
             line-height: 1.5;
-            color: #0d0d0d;
+            color: #1f2937;
+            background: linear-gradient(180deg, #ffffff 0%, #fafaff 100%);
+            border: 1px solid #ede9fe;
+            border-radius: 14px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        .starter-card .stButton > button:hover {
+            border-color: #a855f7;
+            background: linear-gradient(180deg, #ffffff 0%, #f5f3ff 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(108, 62, 245, 0.12);
+            color: #6c3ef5;
+        }
+
+        /* ---------- BADGES ---------- */
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+        }
+        .badge-purple { background: #ede9fe; color: #6c3ef5; }
+        .badge-blue   { background: #dbeafe; color: #3b82f6; }
+        .badge-green  { background: #d1fae5; color: #10b981; }
+        .badge-orange { background: #ffedd5; color: #f97316; }
+        .badge-pink   { background: #fce7f3; color: #ec4899; }
+
+        /* ---------- STAT CARDS ---------- */
+        .stat-card {
+            background: linear-gradient(135deg, #ffffff 0%, #fafaff 100%);
+            border: 1px solid #f3f4f6;
+            border-radius: 14px;
+            padding: 16px 18px;
+            margin-bottom: 12px;
+        }
+
+        /* ---------- Expander ---------- */
+        details {
+            border: 1px solid #f3f4f6;
+            border-radius: 12px;
+            padding: 4px 14px;
+            background: #fafafa;
+        }
+        details summary {
+            font-weight: 600;
+            font-size: 14px;
+            color: #1f2937;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -391,7 +538,7 @@ def trim_history(messages, max_tokens=MAX_CONTEXT_TOKENS):
 
 
 # ============================================================
-# POLLINATIONS — IMAGE GENERATION
+# IMAGE GENERATION
 # ============================================================
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_image_models():
@@ -404,19 +551,16 @@ def fetch_image_models():
         elif isinstance(data, dict):
             models = list(data.keys())
         else:
-            models = ["flux", "turbo", "flux-realism"]
+            models = ["flux", "turbo"]
         models = [str(m) for m in models if m]
         return models if models else ["flux", "turbo"]
     except Exception:
         return ["flux", "turbo", "flux-realism", "flux-anime", "flux-3d"]
 
 
-def generate_image(prompt: str, width: int = 1024, height: int = 1024,
-                   model: str = "flux", seed: int = None,
-                   enhance: bool = True, nologo: bool = True) -> bytes:
+def generate_image(prompt, width=1024, height=1024, model="flux", seed=None, enhance=True, nologo=True):
     if not prompt or not prompt.strip():
         raise TreatsError("Please enter an image prompt.")
-
     encoded = quote(prompt.strip())
     url = f"https://image.pollinations.ai/prompt/{encoded}"
     params = {
@@ -468,7 +612,34 @@ async def _tts_generate(text, voice, rate, pitch, volume):
 
 
 # ============================================================
-# SIDEBAR NAVIGATION
+# TOOL HEADER HELPER
+# ============================================================
+TOOL_ICONS = {
+    "chat": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>""",
+    "cv": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>""",
+    "password": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>""",
+    "video": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>""",
+    "tts": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ec4899" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>""",
+    "photo": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>""",
+}
+
+
+def render_tool_header(theme_key, title, subtitle):
+    st.markdown(
+        f'<div class="tool-header theme-{theme_key}">'
+        f'<div class="icon">{TOOL_ICONS[theme_key]}</div>'
+        f'<div class="title-block">'
+        f'<h1>{title}</h1>'
+        f'<p>{subtitle}</p>'
+        f'</div>'
+        f'</div>'
+        f'<div style="height: 24px"></div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ============================================================
+# SIDEBAR
 # ============================================================
 TOOLS = {
     "Chat": "chat",
@@ -481,12 +652,13 @@ TOOLS = {
 
 with st.sidebar:
     st.markdown(
-        '<div class="treats-brand">'
-        '<span class="dot">T</span>'
-        '<span>Treats</span>'
-        '</div>',
+        f'<div class="treats-brand">'
+        f'<img src="{LOGO_URI}" alt="Treats">'
+        f'<span class="name">Treats</span>'
+        f'</div>',
         unsafe_allow_html=True,
     )
+
     choice_label = st.radio(
         "Navigation",
         list(TOOLS.keys()),
@@ -495,10 +667,11 @@ with st.sidebar:
     )
     tool = TOOLS[choice_label]
 
-    st.markdown("<div style='height: 40vh'></div>", unsafe_allow_html=True)
     st.markdown(
-        "<div style='padding: 0 14px; color: #6e6e80; font-size: 12px;'>"
-        "Treats v2.0<br>Powered by Groq</div>",
+        '<div class="sidebar-footer">'
+        '<strong>Treats v2.0</strong><br>'
+        'Powered by Groq'
+        '</div>',
         unsafe_allow_html=True,
     )
 
@@ -510,46 +683,35 @@ def render_chat():
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Top controls (only when conversation exists)
+    # Controls
     if st.session_state.messages:
-        c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
+        render_tool_header("chat", "Chat", "Conversation with AI")
+        c1, c2, c3 = st.columns([2, 2, 1])
         with c1:
-            model = st.selectbox(
-                "Model",
-                AVAILABLE_MODELS,
-                key="model",
-                label_visibility="collapsed",
-            )
+            model = st.selectbox("Model", AVAILABLE_MODELS, key="model")
         with c2:
-            temp = st.slider(
-                "Temperature",
-                0.0, 1.5, 0.7, 0.1,
-                key="temp",
-                label_visibility="collapsed",
-            )
+            temp = st.slider("Temperature", 0.0, 1.5, 0.7, 0.1, key="temp")
         with c3:
+            st.markdown("<div style='height: 28px'></div>", unsafe_allow_html=True)
             if st.button("New chat", key="new_conv", use_container_width=True):
                 st.session_state.messages = []
                 st.rerun()
-        with c4:
-            if st.button("Export", key="export_btn", use_container_width=True):
-                st.session_state.show_export = not st.session_state.get("show_export", False)
         st.markdown("---")
     else:
         model = "openai/gpt-oss-120b"
         temp = 0.7
 
-    # Empty state — hero
+    # Empty state
     if not st.session_state.messages:
         st.markdown(
-            '<div class="treats-hero">'
-            '<div class="logo">T</div>'
-            '<h2>How can I help you today?</h2>'
-            '<p>Ask anything. Treats is here to assist.</p>'
-            '</div>',
+            f'<div class="treats-hero">'
+            f'<img src="{LOGO_URI}" class="hero-logo" alt="Treats">'
+            f'<h2>How can I help you today?</h2>'
+            f'<p>Ask anything. Treats is here to assist.</p>'
+            f'</div>',
             unsafe_allow_html=True,
         )
-        st.markdown("<div style='height: 12px'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height: 20px'></div>", unsafe_allow_html=True)
 
         starters = [
             "Explain vector databases in simple terms.",
@@ -579,29 +741,23 @@ def render_chat():
                         st.session_state.messages = st.session_state.messages[:i]
                         st.rerun()
 
-    # Export panel
-    if st.session_state.get("show_export") and st.session_state.messages:
-        with st.expander("Export conversation", expanded=True):
+    # Export
+    if st.session_state.messages:
+        with st.expander("Export conversation"):
             col1, col2 = st.columns(2)
             with col1:
-                md = "\n\n".join(
-                    f"**{m['role'].capitalize()}:** {m['content']}"
-                    for m in st.session_state.messages
-                )
+                md = "\n\n".join(f"**{m['role'].capitalize()}:** {m['content']}" for m in st.session_state.messages)
                 st.download_button(
-                    "Download Markdown",
-                    data=md,
+                    "Download Markdown", data=md,
                     file_name=f"treats_chat_{datetime.now():%Y%m%d_%H%M}.md",
-                    mime="text/markdown",
-                    use_container_width=True,
+                    mime="text/markdown", use_container_width=True,
                 )
             with col2:
                 st.download_button(
                     "Download JSON",
                     data=json.dumps(st.session_state.messages, ensure_ascii=False, indent=2),
                     file_name=f"treats_chat_{datetime.now():%Y%m%d_%H%M}.json",
-                    mime="application/json",
-                    use_container_width=True,
+                    mime="application/json", use_container_width=True,
                 )
 
     # Input
@@ -610,16 +766,13 @@ def render_chat():
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.rerun()
 
-    # Generate response
+    # Generate
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
         try:
             client = get_client()
             history = trim_history(st.session_state.messages)
             stream = client.chat.completions.create(
-                model=model,
-                messages=history,
-                temperature=temp,
-                stream=True,
+                model=model, messages=history, temperature=temp, stream=True,
             )
             with st.chat_message("assistant"):
                 placeholder = st.empty()
@@ -641,8 +794,7 @@ def render_chat():
 # TOOL: CV BUILDER
 # ============================================================
 def render_cv():
-    st.title("CV Builder")
-    st.caption("Generate a professional CV in seconds.")
+    render_tool_header("cv", "CV Builder", "Generate a professional CV in seconds")
 
     with st.form("cv_form"):
         col1, col2 = st.columns(2)
@@ -656,7 +808,6 @@ def render_cv():
             skills = st.text_input("Skills (comma-separated)")
 
         exp = st.text_area("Experience", placeholder="One bullet per line", height=140)
-
         submitted = st.form_submit_button("Generate CV", type="primary", use_container_width=True)
 
     if submitted:
@@ -698,8 +849,7 @@ Format in clean Markdown with clear headings."""
 def render_password():
     import string
 
-    st.title("Password Generator")
-    st.caption("Create strong, secure passwords.")
+    render_tool_header("password", "Password Generator", "Create strong, secure passwords")
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -725,8 +875,7 @@ def render_password():
 # TOOL: VIDEO SCRIPT
 # ============================================================
 def render_video():
-    st.title("Video Script")
-    st.caption("Generate scripts with scene-by-scene storyboards.")
+    render_tool_header("video", "Video Script", "Generate scripts with scene-by-scene storyboards")
 
     with st.form("video_form"):
         topic = st.text_input("Topic")
@@ -770,11 +919,9 @@ Break into scenes with a storyboard (timestamp, visual, narration)."""
 # TOOL: TEXT TO SPEECH
 # ============================================================
 def render_tts():
-    st.title("Text to Speech")
-    st.caption("Convert text into natural-sounding speech.")
+    render_tool_header("tts", "Text to Speech", "Convert text into natural-sounding speech")
 
     voices = fetch_available_voice_ids()
-
     lang_choice = st.radio("Language", ["English", "Arabic"], horizontal=True)
     voice_pool = voices["en"] if lang_choice == "English" else voices["ar"]
 
@@ -814,8 +961,7 @@ def render_tts():
 # TOOL: IMAGE GENERATOR
 # ============================================================
 def render_photo():
-    st.title("Image Generator")
-    st.caption("Create images from text descriptions. Free, no API key required.")
+    render_tool_header("photo", "Image Generator", "Create images from text descriptions — free, no API key")
 
     with st.spinner("Loading models..."):
         models = fetch_image_models()
@@ -883,8 +1029,7 @@ def render_photo():
                 "Download PNG",
                 data=st.session_state["last_image"],
                 file_name=f"treats_photo_{datetime.now():%Y%m%d_%H%M%S}.png",
-                mime="image/png",
-                use_container_width=True,
+                mime="image/png", use_container_width=True,
             )
         with col2:
             if st.button("Regenerate", key="photo_regen", use_container_width=True):
