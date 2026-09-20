@@ -19,7 +19,7 @@ st.set_page_config(
 )
 
 # ============================================================
-# INLINE SVG LOGO
+# INLINE SVG LOGO — perfectly centered, no asymmetric sparkles
 # ============================================================
 LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
   <defs>
@@ -43,9 +43,6 @@ LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
   <path d="M42 62 Q46 57 50 62" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>
   <path d="M70 62 Q74 57 78 62" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>
   <path d="M52 74 Q60 81 68 74" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>
-  <circle cx="102" cy="40" r="3.5" fill="#fbbf24"/>
-  <circle cx="110" cy="52" r="2.5" fill="#fbbf24"/>
-  <circle cx="96" cy="55" r="2" fill="#fbbf24"/>
 </svg>"""
 
 LOGO_URI = "data:image/svg+xml;base64," + base64.b64encode(LOGO_SVG.encode()).decode()
@@ -84,9 +81,10 @@ def load_css():
         }
 
         /* ============================================================
-           SIDEBAR CLOSE BUTTON — hidden on Desktop/iPad, visible on Mobile
+           SIDEBAR CLOSE BUTTON
+           - Hidden on Desktop/iPad (>= 769px)
+           - Visible on Mobile (<= 768px)
            ============================================================ */
-        /* Desktop + iPad (>= 769px): hide close button → sidebar can't be closed */
         @media (min-width: 769px) {
             [data-testid="stSidebarCollapseButton"],
             [data-testid="stSidebarCollapsedControl"],
@@ -98,7 +96,6 @@ def load_css():
             }
         }
 
-        /* Mobile (<= 768px): keep toggle visible in purple */
         @media (max-width: 768px) {
             [data-testid="stSidebarCollapseButton"],
             [data-testid="stSidebarCollapsedControl"],
@@ -337,7 +334,6 @@ def load_css():
             padding-right: 1.5rem !important;
         }
 
-        /* Chat input wrapper — centered */
         [data-testid="stChatInput"],
         [data-testid="stChatInputContainer"],
         [data-testid="stBottomBlockContainer"] {
@@ -540,7 +536,7 @@ def load_css():
         }
 
         /* ============================================================
-           HERO — clean, centered, logo + title only
+           HERO — logo + title, PERFECTLY CENTERED
            ============================================================ */
         .treats-hero {
             display: flex !important;
@@ -551,16 +547,20 @@ def load_css():
             min-height: 52vh !important;
             padding: 20px 16px !important;
             gap: 0 !important;
+            width: 100% !important;
+            margin: 0 auto !important;
         }
 
         .treats-hero .hero-logo {
             width: 140px !important;
             height: 140px !important;
-            margin: 0 0 28px 0 !important;
+            margin: 0 auto 28px auto !important;
+            padding: 0 !important;
             filter: drop-shadow(0 14px 36px rgba(108, 62, 245, 0.22)) !important;
             animation: float 3s ease-in-out infinite;
             display: block !important;
             object-fit: contain !important;
+            object-position: center center !important;
         }
 
         @keyframes float {
@@ -572,10 +572,13 @@ def load_css():
             font-size: 34px !important;
             font-weight: 800 !important;
             color: #111827 !important;
-            margin: 0 !important;
+            margin: 0 auto !important;
             padding: 0 !important;
             letter-spacing: -0.035em !important;
             line-height: 1.15 !important;
+            text-align: center !important;
+            display: block !important;
+            width: 100% !important;
             background: linear-gradient(135deg, #1f2937 0%, #6c3ef5 100%) !important;
             -webkit-background-clip: text !important;
             -webkit-text-fill-color: transparent !important;
@@ -596,7 +599,7 @@ def load_css():
         }
 
         /* ============================================================
-           iPAD + TABLET SPECIFIC (769px - 1100px)
+           iPAD + TABLET (769px - 1100px)
            ============================================================ */
         @media (min-width: 769px) and (max-width: 1100px) {
             .main .block-container,
@@ -1271,4 +1274,4 @@ elif tool == "video":
 elif tool == "tts":
     render_tts()
 elif tool == "photo":
-    render_photo()        
+    render_photo()
