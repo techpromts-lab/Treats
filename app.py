@@ -63,14 +63,27 @@ def load_css():
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         }
 
-        /* Hide noisy chrome — keep header so hamburger shows */
-        #MainMenu { visibility: hidden; }
-        footer { visibility: hidden; }
-        [data-testid="stDecoration"] { display: none; }
+        /* ---------- HIDE STREAMLIT CHROME (keep sidebar toggle) ---------- */
+        #MainMenu { visibility: hidden !important; }
+        footer { visibility: hidden !important; }
+        [data-testid="stDecoration"] { display: none !important; }
+        [data-testid="stToolbar"] { display: none !important; }
+        [data-testid="stMainMenu"] { display: none !important; }
+        [data-testid="stStatusWidget"] { display: none !important; }
+        [data-testid="stToolbarActions"] { display: none !important; }
+        [data-testid="stAppDeployButton"] { display: none !important; }
 
         header[data-testid="stHeader"] {
-            background: transparent;
-            box-shadow: none;
+            background: transparent !important;
+            box-shadow: none !important;
+        }
+
+        /* Ensure sidebar toggle stays visible and functional */
+        [data-testid="stSidebarCollapsedControl"],
+        [data-testid="collapsedControl"] {
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
         }
 
         .stApp {
@@ -155,7 +168,6 @@ def load_css():
             background-clip: text;
         }
 
-        /* Sidebar section label */
         .sidebar-label {
             font-size: 11px;
             font-weight: 700;
@@ -211,7 +223,6 @@ def load_css():
             box-sizing: content-box;
         }
 
-        /* Tool icons */
         label[data-baseweb="radio"]:nth-of-type(1)::before {
             background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>") !important;
             background-color: #eef2ff;
@@ -756,7 +767,6 @@ TOOLS = {
 }
 
 with st.sidebar:
-    # Brand
     st.markdown(
         f'<div class="treats-brand">'
         f'<img src="{LOGO_URI}" alt="Treats">'
@@ -765,7 +775,6 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    # Tools
     st.markdown('<div class="sidebar-label">Tools</div>', unsafe_allow_html=True)
     choice_label = st.radio(
         "Navigation",
@@ -775,7 +784,6 @@ with st.sidebar:
     )
     tool = TOOLS[choice_label]
 
-    # Model selector (moved here)
     st.markdown('<div class="sidebar-label">AI Model</div>', unsafe_allow_html=True)
     model = st.selectbox(
         "AI Model",
@@ -784,7 +792,6 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
-    # Footer
     st.markdown(
         '<div class="sidebar-footer">'
         '<strong>Treats v2.0</strong><br>'
@@ -801,7 +808,6 @@ def render_chat():
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Empty state — hero
     if not st.session_state.messages:
         st.markdown(
             f'<div class="treats-hero">'
@@ -812,7 +818,6 @@ def render_chat():
             unsafe_allow_html=True,
         )
 
-    # Render messages
     for i, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -826,7 +831,6 @@ def render_chat():
                         st.session_state.messages = st.session_state.messages[:i]
                         st.rerun()
 
-    # New chat + Export
     if st.session_state.messages:
         c1, c2 = st.columns([1, 1])
         with c1:
@@ -851,13 +855,11 @@ def render_chat():
                         mime="application/json", use_container_width=True,
                     )
 
-    # Input
     prompt = st.chat_input("Message Treats...")
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.rerun()
 
-    # Generate
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
         try:
             client = get_client()
