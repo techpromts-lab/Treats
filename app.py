@@ -296,17 +296,57 @@ def load_css():
             font-weight: 600;
         }
 
-        /* ---------- MAIN CONTENT ---------- */
-        .main .block-container,
-        section.main > div.block-container {
-            max-width: 780px;
-            padding-top: 1.5rem;
-            padding-bottom: 5rem;
-            padding-left: 1.5rem;
-            padding-right: 1.5rem;
-            margin: 0 auto;
+        /* ============================================================
+           CENTER CHAT WHEN SIDEBAR IS CLOSED (iPad/Tablet fix)
+           ============================================================ */
+        section.main,
+        [data-testid="stMain"] {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            width: 100% !important;
         }
 
+        section.main > div.block-container,
+        [data-testid="stMain"] > div.block-container,
+        .main .block-container {
+            width: 100% !important;
+            max-width: 780px !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            padding-top: 1.5rem !important;
+            padding-bottom: 5rem !important;
+            padding-left: 1.5rem !important;
+            padding-right: 1.5rem !important;
+        }
+
+        /* Chat input wrapper — centered when sidebar closed */
+        [data-testid="stChatInput"],
+        [data-testid="stChatInputContainer"],
+        [data-testid="stBottomBlockContainer"] {
+            max-width: 780px !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            width: 100% !important;
+            left: 0 !important;
+            right: 0 !important;
+            transform: none !important;
+        }
+
+        [data-testid="stBottom"] {
+            width: 100% !important;
+            left: 0 !important;
+            right: 0 !important;
+            display: flex !important;
+            justify-content: center !important;
+        }
+        [data-testid="stBottom"] > div {
+            width: 100% !important;
+            max-width: 780px !important;
+            margin: 0 auto !important;
+        }
+
+        /* ---------- TYPOGRAPHY ---------- */
         h1 {
             font-size: 30px !important;
             font-weight: 800 !important;
@@ -485,14 +525,20 @@ def load_css():
         /* ---------- HERO ---------- */
         .treats-hero {
             text-align: center;
-            padding: 30px 20px 20px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 55vh;
+            padding: 20px;
         }
         .treats-hero .hero-logo {
-            width: 120px;
-            height: 120px;
-            margin: 0 auto 16px auto;
-            filter: drop-shadow(0 12px 32px rgba(108, 62, 245, 0.25));
+            width: 130px;
+            height: 130px;
+            margin: 0 0 28px 0;
+            filter: drop-shadow(0 12px 32px rgba(108, 62, 245, 0.22));
             animation: float 3s ease-in-out infinite;
+            display: block;
         }
         @keyframes float {
             0%, 100% { transform: translateY(0); }
@@ -528,7 +574,37 @@ def load_css():
             color: #1f2937;
         }
 
-        /* ---------- RESPONSIVE ---------- */
+        /* ============================================================
+           iPAD + TABLET SPECIFIC (769px - 1100px)
+           ============================================================ */
+        @media (min-width: 769px) and (max-width: 1100px) {
+            .main .block-container,
+            section.main > div.block-container {
+                max-width: 680px !important;
+                padding-left: 2rem !important;
+                padding-right: 2rem !important;
+            }
+
+            [data-testid="stChatInput"],
+            [data-testid="stChatInputContainer"],
+            [data-testid="stBottomBlockContainer"],
+            [data-testid="stBottom"] > div {
+                max-width: 680px !important;
+            }
+
+            .treats-hero {
+                min-height: 50vh !important;
+            }
+            .treats-hero .hero-logo {
+                width: 110px !important;
+                height: 110px !important;
+            }
+            .treats-hero h2 {
+                font-size: 26px !important;
+            }
+        }
+
+        /* ---------- MOBILE (<= 768px) ---------- */
         @media (max-width: 768px) {
             [data-testid="stSidebar"] {
                 min-width: 82vw !important;
@@ -552,9 +628,9 @@ def load_css():
             .tool-header .title-block h1 { font-size: 19px !important; }
             .tool-header .title-block p { font-size: 12.5px !important; }
 
-            .treats-hero { padding: 20px 8px 16px 8px; }
-            .treats-hero h2 { font-size: 22px; }
-            .treats-hero .hero-logo { width: 80px; height: 80px; }
+            .treats-hero { min-height: 60vh; padding: 16px 12px; }
+            .treats-hero h2 { font-size: 24px; }
+            .treats-hero .hero-logo { width: 110px; height: 110px; margin-bottom: 22px; }
 
             .stButton > button,
             .stDownloadButton > button {
