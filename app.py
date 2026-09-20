@@ -63,12 +63,47 @@ def load_css():
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         }
 
-        /* Hide Streamlit chrome */
+        /* Hide Streamlit chrome (but keep sidebar toggle visible) */
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
-        header[data-testid="stHeader"] { background: transparent; height: 0; }
         [data-testid="stToolbar"] { display: none; }
         [data-testid="stDecoration"] { display: none; }
+
+        /* Header stays transparent but visible so mobile hamburger shows */
+        header[data-testid="stHeader"] {
+            background: transparent;
+            height: auto;
+            min-height: 48px;
+        }
+
+        /* Style the sidebar toggle (mobile hamburger + desktop arrow) */
+        [data-testid="collapsedControl"],
+        [data-testid="stSidebarCollapsedControl"] {
+            display: flex !important;
+            visibility: visible !important;
+            color: #6c3ef5 !important;
+            background: #ffffff !important;
+            border: 1px solid #ede9fe !important;
+            border-radius: 10px !important;
+            padding: 6px !important;
+            margin: 8px !important;
+            box-shadow: 0 2px 10px rgba(108, 62, 245, 0.15) !important;
+            transition: all 0.15s ease !important;
+            z-index: 999 !important;
+        }
+        [data-testid="collapsedControl"]:hover,
+        [data-testid="stSidebarCollapsedControl"]:hover {
+            background: #f5f3ff !important;
+            border-color: #a855f7 !important;
+            transform: scale(1.05);
+        }
+        [data-testid="collapsedControl"] svg,
+        [data-testid="stSidebarCollapsedControl"] svg {
+            color: #6c3ef5 !important;
+            fill: #6c3ef5 !important;
+            width: 20px !important;
+            height: 20px !important;
+        }
 
         .stApp { background: #ffffff; }
 
@@ -451,31 +486,6 @@ def load_css():
             color: #6c3ef5;
         }
 
-        /* ---------- BADGES ---------- */
-        .badge {
-            display: inline-block;
-            padding: 3px 10px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.02em;
-            text-transform: uppercase;
-        }
-        .badge-purple { background: #ede9fe; color: #6c3ef5; }
-        .badge-blue   { background: #dbeafe; color: #3b82f6; }
-        .badge-green  { background: #d1fae5; color: #10b981; }
-        .badge-orange { background: #ffedd5; color: #f97316; }
-        .badge-pink   { background: #fce7f3; color: #ec4899; }
-
-        /* ---------- STAT CARDS ---------- */
-        .stat-card {
-            background: linear-gradient(135deg, #ffffff 0%, #fafaff 100%);
-            border: 1px solid #f3f4f6;
-            border-radius: 14px;
-            padding: 16px 18px;
-            margin-bottom: 12px;
-        }
-
         /* ---------- Expander ---------- */
         details {
             border: 1px solid #f3f4f6;
@@ -487,6 +497,29 @@ def load_css():
             font-weight: 600;
             font-size: 14px;
             color: #1f2937;
+        }
+
+        /* ---------- RESPONSIVE (mobile) ---------- */
+        @media (max-width: 768px) {
+            [data-testid="stSidebar"] {
+                min-width: 85vw !important;
+                max-width: 85vw !important;
+            }
+            .main .block-container,
+            section.main > div.block-container {
+                padding-left: 1rem;
+                padding-right: 1rem;
+                padding-top: 1rem;
+            }
+            h1 { font-size: 24px !important; }
+            .tool-header .title-block h1 { font-size: 20px !important; }
+            .treats-hero h2 { font-size: 24px; }
+            .treats-hero .hero-logo { width: 90px; height: 90px; }
+            .stButton > button,
+            .stDownloadButton > button {
+                font-size: 13px;
+                padding: 8px 14px;
+            }
         }
     </style>
     """, unsafe_allow_html=True)
@@ -683,7 +716,6 @@ def render_chat():
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Controls
     if st.session_state.messages:
         render_tool_header("chat", "Chat", "Conversation with AI")
         c1, c2, c3 = st.columns([2, 2, 1])
@@ -701,7 +733,6 @@ def render_chat():
         model = "openai/gpt-oss-120b"
         temp = 0.7
 
-    # Empty state
     if not st.session_state.messages:
         st.markdown(
             f'<div class="treats-hero">'
@@ -727,7 +758,6 @@ def render_chat():
                     st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
 
-    # Render messages
     for i, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -741,7 +771,6 @@ def render_chat():
                         st.session_state.messages = st.session_state.messages[:i]
                         st.rerun()
 
-    # Export
     if st.session_state.messages:
         with st.expander("Export conversation"):
             col1, col2 = st.columns(2)
@@ -760,13 +789,11 @@ def render_chat():
                     mime="application/json", use_container_width=True,
                 )
 
-    # Input
     prompt = st.chat_input("Message Treats...")
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.rerun()
 
-    # Generate
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
         try:
             client = get_client()
