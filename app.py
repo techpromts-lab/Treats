@@ -820,7 +820,7 @@ def render_chat():
             f'<div class="treats-hero">'
             f'<img src="{LOGO_URI}" class="hero-logo" alt="Treats">'
             f'<h2>How can I help you today?</h2>'
-            f'<p>Ask anything. Treats is here to assist.</p>'
+            f'<p>What\'s on your mind today?</p>'
             f'</div>',
             unsafe_allow_html=True,
         )
