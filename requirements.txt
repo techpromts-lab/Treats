@@ -1,3 +1,4 @@
 streamlit>=1.40.0
 groq>=0.30.0
 edge-tts>=6.1.0
+requests>=2.31.0
