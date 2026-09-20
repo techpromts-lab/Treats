@@ -73,7 +73,7 @@ def load_css():
         header[data-testid="stHeader"] {
             background: transparent;
             height: auto;
-            min-height: 48px;
+            min-height: 52px;
         }
 
         /* ---------- SIDEBAR TOGGLE (HAMBURGER) ---------- */
@@ -83,33 +83,40 @@ def load_css():
             visibility: visible !important;
             color: #6c3ef5 !important;
             background: #ffffff !important;
-            border: 1px solid #ede9fe !important;
-            border-radius: 10px !important;
+            border: 1.5px solid #ddd6fe !important;
+            border-radius: 12px !important;
             padding: 8px !important;
             margin: 0 !important;
             position: fixed !important;
-            top: 12px !important;
-            left: 16px !important;
-            width: 42px !important;
-            height: 42px !important;
+            top: 8px !important;
+            left: 8px !important;
+            width: 44px !important;
+            height: 44px !important;
             align-items: center !important;
             justify-content: center !important;
-            box-shadow: 0 2px 10px rgba(108, 62, 245, 0.15) !important;
+            box-shadow: 0 2px 12px rgba(108, 62, 245, 0.18) !important;
             transition: all 0.15s ease !important;
             z-index: 99999 !important;
+            cursor: pointer !important;
         }
         [data-testid="collapsedControl"]:hover,
         [data-testid="stSidebarCollapsedControl"]:hover {
             background: #f5f3ff !important;
             border-color: #a855f7 !important;
-            transform: scale(1.05);
+            transform: scale(1.08);
+            box-shadow: 0 4px 16px rgba(108, 62, 245, 0.28) !important;
+        }
+        [data-testid="collapsedControl"]:active,
+        [data-testid="stSidebarCollapsedControl"]:active {
+            transform: scale(0.95);
         }
         [data-testid="collapsedControl"] svg,
         [data-testid="stSidebarCollapsedControl"] svg {
             color: #6c3ef5 !important;
             fill: #6c3ef5 !important;
-            width: 20px !important;
-            height: 20px !important;
+            width: 22px !important;
+            height: 22px !important;
+            stroke-width: 2.5 !important;
         }
 
         .stApp {
@@ -305,7 +312,7 @@ def load_css():
         .main .block-container,
         section.main > div.block-container {
             max-width: 780px;
-            padding-top: 1.5rem;
+            padding-top: 3.5rem;
             padding-bottom: 5rem;
             padding-left: 1.5rem;
             padding-right: 1.5rem;
@@ -573,14 +580,20 @@ def load_css():
                 max-width: 82vw !important;
             }
 
-            /* Hamburger: push it more inside on mobile */
+            /* Hamburger: closer to the edge on mobile */
             [data-testid="collapsedControl"],
             [data-testid="stSidebarCollapsedControl"] {
-                top: 14px !important;
-                left: 20px !important;
-                width: 44px !important;
-                height: 44px !important;
-                padding: 10px !important;
+                top: 8px !important;
+                left: 8px !important;
+                width: 42px !important;
+                height: 42px !important;
+                padding: 8px !important;
+                border-radius: 11px !important;
+            }
+            [data-testid="collapsedControl"] svg,
+            [data-testid="stSidebarCollapsedControl"] svg {
+                width: 20px !important;
+                height: 20px !important;
             }
 
             /* Zoom in: tighter padding, wider content */
@@ -588,14 +601,14 @@ def load_css():
             section.main > div.block-container {
                 padding-left: 0.75rem !important;
                 padding-right: 0.75rem !important;
-                padding-top: 0.75rem !important;
+                padding-top: 3.5rem !important;
                 padding-bottom: 3rem !important;
                 max-width: 100% !important;
             }
 
             /* Tighter header on mobile */
             header[data-testid="stHeader"] {
-                min-height: 40px;
+                min-height: 52px;
             }
 
             /* Typography adjusts for zoomed-in feel */
