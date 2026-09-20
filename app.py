@@ -63,60 +63,90 @@ def load_css():
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         }
 
-        /* Hide Streamlit chrome (but keep sidebar toggle visible) */
+        /* Hide Streamlit chrome */
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
         [data-testid="stToolbar"] { display: none; }
         [data-testid="stDecoration"] { display: none; }
 
-        /* Header stays transparent but visible so mobile hamburger shows */
-        header[data-testid="stHeader"] {
-            background: transparent;
-            height: auto;
-            min-height: 52px;
-        }
-
-        /* ---------- SIDEBAR TOGGLE (HAMBURGER) ---------- */
+        /* ============================================================
+           SIDEBAR TOGGLE — 3 LINES, VERY VISIBLE
+           ============================================================ */
         [data-testid="collapsedControl"],
-        [data-testid="stSidebarCollapsedControl"] {
+        [data-testid="stSidebarCollapsedControl"],
+        [data-testid="stExpandSidebarButton"],
+        [data-testid="stSidebarNavCollapseButton"],
+        button[kind="headerNoPadding"],
+        button[kind="header"] {
             display: flex !important;
             visibility: visible !important;
-            color: #6c3ef5 !important;
-            background: #ffffff !important;
-            border: 1.5px solid #ddd6fe !important;
-            border-radius: 12px !important;
-            padding: 8px !important;
-            margin: 0 !important;
+            opacity: 1 !important;
             position: fixed !important;
-            top: 8px !important;
-            left: 8px !important;
-            width: 44px !important;
-            height: 44px !important;
+            top: 12px !important;
+            left: 12px !important;
+            width: 48px !important;
+            height: 48px !important;
+            min-width: 48px !important;
+            min-height: 48px !important;
+            max-width: 48px !important;
+            max-height: 48px !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            background-color: #ffffff !important;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236c3ef5' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><line x1='4' y1='7' x2='20' y2='7'/><line x1='4' y1='12' x2='20' y2='12'/><line x1='4' y1='17' x2='20' y2='17'/></svg>") !important;
+            background-repeat: no-repeat !important;
+            background-position: center center !important;
+            background-size: 26px 26px !important;
+            border: 2px solid #6c3ef5 !important;
+            border-radius: 12px !important;
+            box-shadow: 0 4px 16px rgba(108, 62, 245, 0.4) !important;
+            z-index: 2147483647 !important;
+            cursor: pointer !important;
+            transition: all 0.15s ease !important;
             align-items: center !important;
             justify-content: center !important;
-            box-shadow: 0 2px 12px rgba(108, 62, 245, 0.18) !important;
-            transition: all 0.15s ease !important;
-            z-index: 99999 !important;
-            cursor: pointer !important;
+            text-indent: -9999px !important;
+            overflow: hidden !important;
+            font-size: 0 !important;
         }
+
+        /* Hide the default Streamlit icon so our 3 lines show */
+        [data-testid="collapsedControl"] svg,
+        [data-testid="stSidebarCollapsedControl"] svg,
+        [data-testid="stExpandSidebarButton"] svg,
+        [data-testid="stSidebarNavCollapseButton"] svg,
+        [data-testid="collapsedControl"] span,
+        [data-testid="stSidebarCollapsedControl"] span,
+        [data-testid="stExpandSidebarButton"] span,
+        [data-testid="stSidebarNavCollapseButton"] span {
+            display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+            width: 0 !important;
+            height: 0 !important;
+            font-size: 0 !important;
+        }
+
+        /* Hover effect */
         [data-testid="collapsedControl"]:hover,
-        [data-testid="stSidebarCollapsedControl"]:hover {
-            background: #f5f3ff !important;
+        [data-testid="stSidebarCollapsedControl"]:hover,
+        [data-testid="stExpandSidebarButton"]:hover {
+            background-color: #f5f3ff !important;
             border-color: #a855f7 !important;
             transform: scale(1.08);
-            box-shadow: 0 4px 16px rgba(108, 62, 245, 0.28) !important;
+            box-shadow: 0 6px 22px rgba(108, 62, 245, 0.55) !important;
         }
+
+        /* Active press effect */
         [data-testid="collapsedControl"]:active,
         [data-testid="stSidebarCollapsedControl"]:active {
-            transform: scale(0.95);
+            transform: scale(0.92);
         }
-        [data-testid="collapsedControl"] svg,
-        [data-testid="stSidebarCollapsedControl"] svg {
-            color: #6c3ef5 !important;
-            fill: #6c3ef5 !important;
-            width: 22px !important;
-            height: 22px !important;
-            stroke-width: 2.5 !important;
+
+        /* Make sure header doesn't cover our button */
+        header[data-testid="stHeader"] {
+            background: transparent !important;
+            z-index: 1 !important;
         }
 
         .stApp {
@@ -132,7 +162,6 @@ def load_css():
             -webkit-tap-highlight-color: transparent;
         }
 
-        /* Disable selection on UI elements (not on text content) */
         button,
         .stButton,
         .stDownloadButton,
@@ -143,10 +172,7 @@ def load_css():
         .sidebar-footer,
         .treats-hero,
         .starter-card,
-        [data-testid="stSidebar"],
-        [data-testid="stHeader"],
-        [data-testid="collapsedControl"],
-        [data-testid="stSidebarCollapsedControl"] {
+        [data-testid="stSidebar"] {
             -webkit-user-select: none;
             -moz-user-select: none;
             -ms-user-select: none;
@@ -154,7 +180,6 @@ def load_css():
             -webkit-touch-callout: none;
         }
 
-        /* Keep text selectable where it matters */
         [data-testid="stChatMessage"],
         [data-testid="stChatMessage"] *,
         .stMarkdown,
@@ -166,14 +191,12 @@ def load_css():
             user-select: text;
         }
 
-        /* Chat input: allow smooth typing on mobile */
         [data-testid="stChatInput"] textarea {
             touch-action: manipulation;
             -webkit-user-select: text;
             user-select: text;
         }
 
-        /* Prevent horizontal scroll on mobile */
         html, body, .stApp {
             overflow-x: hidden;
             max-width: 100vw;
@@ -211,7 +234,6 @@ def load_css():
             background-clip: text;
         }
 
-        /* Radio group */
         [data-testid="stSidebar"] [data-testid="stRadio"] > div[role="radiogroup"] {
             gap: 3px !important;
             display: flex;
@@ -256,7 +278,6 @@ def load_css():
             box-sizing: content-box;
         }
 
-        /* Colored icons per tool */
         label[data-baseweb="radio"]:nth-of-type(1)::before {
             background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>") !important;
             background-color: #eef2ff;
@@ -282,7 +303,6 @@ def load_css():
             background-color: #ede9fe;
         }
 
-        /* Active item */
         label[data-baseweb="radio"]:has(input:checked) {
             background: #ffffff !important;
             border-color: #ddd6fe !important;
@@ -338,7 +358,6 @@ def load_css():
             color: #1f2937;
         }
 
-        /* Colored tool headings */
         .tool-header {
             display: flex;
             align-items: center;
@@ -370,7 +389,6 @@ def load_css():
             font-size: 14px !important;
         }
 
-        /* Per-tool color themes */
         .theme-chat   .icon { background: linear-gradient(135deg, #eef2ff, #e0e7ff); }
         .theme-cv     .icon { background: linear-gradient(135deg, #dbeafe, #bfdbfe); }
         .theme-pass   .icon { background: linear-gradient(135deg, #d1fae5, #a7f3d0); }
@@ -580,38 +598,29 @@ def load_css():
                 max-width: 82vw !important;
             }
 
-            /* Hamburger: closer to the edge on mobile */
+            /* Hamburger stays at top-left, slightly bigger for mobile */
             [data-testid="collapsedControl"],
-            [data-testid="stSidebarCollapsedControl"] {
-                top: 8px !important;
-                left: 8px !important;
-                width: 42px !important;
-                height: 42px !important;
-                padding: 8px !important;
-                border-radius: 11px !important;
-            }
-            [data-testid="collapsedControl"] svg,
-            [data-testid="stSidebarCollapsedControl"] svg {
-                width: 20px !important;
-                height: 20px !important;
+            [data-testid="stSidebarCollapsedControl"],
+            [data-testid="stExpandSidebarButton"],
+            [data-testid="stSidebarNavCollapseButton"],
+            button[kind="headerNoPadding"],
+            button[kind="header"] {
+                top: 10px !important;
+                left: 10px !important;
+                width: 48px !important;
+                height: 48px !important;
+                background-size: 26px 26px !important;
             }
 
-            /* Zoom in: tighter padding, wider content */
             .main .block-container,
             section.main > div.block-container {
                 padding-left: 0.75rem !important;
                 padding-right: 0.75rem !important;
-                padding-top: 3.5rem !important;
+                padding-top: 4rem !important;
                 padding-bottom: 3rem !important;
                 max-width: 100% !important;
             }
 
-            /* Tighter header on mobile */
-            header[data-testid="stHeader"] {
-                min-height: 52px;
-            }
-
-            /* Typography adjusts for zoomed-in feel */
             h1 { font-size: 22px !important; }
             h2 { font-size: 18px !important; }
             .tool-header { gap: 10px; padding-bottom: 12px; }
@@ -624,7 +633,6 @@ def load_css():
             .treats-hero h2 { font-size: 22px; }
             .treats-hero .hero-logo { width: 80px; height: 80px; }
 
-            /* Buttons fill width nicely */
             .stButton > button,
             .stDownloadButton > button {
                 font-size: 13px;
@@ -632,7 +640,6 @@ def load_css():
                 border-radius: 10px;
             }
 
-            /* Sidebar padding tighter */
             [data-testid="stSidebar"] > div:first-child {
                 padding: 1rem 0.5rem 0.75rem 0.5rem !important;
             }
@@ -641,18 +648,15 @@ def load_css():
             .treats-brand .name { font-size: 18px; }
             .sidebar-footer { padding: 12px 8px; font-size: 11px; }
 
-            /* Chat messages tighter */
             [data-testid="stChatMessage"] {
                 padding: 14px 0;
             }
 
-            /* Forms fill screen */
             [data-testid="stForm"] {
                 padding: 16px 14px;
                 border-radius: 14px;
             }
 
-            /* Radio items in sidebar tighter */
             [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
                 padding: 9px 10px !important;
                 font-size: 13.5px !important;
@@ -688,7 +692,7 @@ def get_client():
 AVAILABLE_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"]
 
 # ============================================================
-# SYSTEM PROMPT — Treats knows its own features
+# SYSTEM PROMPT
 # ============================================================
 TREATS_SYSTEM_PROMPT = """You are Treats, a helpful, general-purpose AI assistant built with Streamlit and Groq.
 
@@ -815,7 +819,7 @@ TOOL_ICONS = {
     "cv": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>""",
     "password": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>""",
     "video": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>""",
-    "tts": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ec4899" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>""",
+    "tts": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ec4899" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d='M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07'/></svg>""",
     "photo": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>""",
 }
 
