@@ -7,7 +7,6 @@ import io
 import base64
 from urllib.parse import quote
 from datetime import datetime
-import streamlit.components.v1 as components
 
 # ============================================================
 # PAGE CONFIG
@@ -18,72 +17,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
-# ============================================================
-# JAVASCRIPT HAMBURGER — forces a visible 3-line button
-# ============================================================
-components.html("""
-<script>
-(function() {
-    const doc = window.parent.document;
-
-    const SVG_HAMBURGER = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6c3ef5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="7" x2="21" y2="7"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="17" x2="21" y2="17"></line></svg>';
-
-    const STYLE = 'display:flex !important;visibility:visible !important;opacity:1 !important;position:fixed !important;top:12px !important;left:12px !important;width:48px !important;height:48px !important;min-width:48px !important;min-height:48px !important;padding:0 !important;margin:0 !important;background:#ffffff !important;border:2px solid #6c3ef5 !important;border-radius:12px !important;box-shadow:0 4px 16px rgba(108,62,245,0.4) !important;z-index:2147483647 !important;cursor:pointer !important;align-items:center !important;justify-content:center !important;overflow:visible !important;transform:none !important;';
-
-    const SELECTORS = [
-        '[data-testid="collapsedControl"]',
-        '[data-testid="stSidebarCollapsedControl"]',
-        '[data-testid="stExpandSidebarButton"]',
-        '[data-testid="stSidebarNavCollapseButton"]',
-        'button[kind="headerNoPadding"]',
-        'button[kind="header"]'
-    ];
-
-    function applyStyles() {
-        let found = false;
-
-        SELECTORS.forEach(function(sel) {
-            const els = doc.querySelectorAll(sel);
-            els.forEach(function(el) {
-                found = true;
-                el.style.cssText = STYLE;
-                if (!el.getAttribute('data-treats-done')) {
-                    el.setAttribute('data-treats-done', '1');
-                    el.innerHTML = SVG_HAMBURGER;
-                }
-            });
-        });
-
-        if (!found) {
-            if (!doc.getElementById('treats-hamburger')) {
-                const btn = doc.createElement('button');
-                btn.id = 'treats-hamburger';
-                btn.innerHTML = SVG_HAMBURGER;
-                btn.style.cssText = STYLE;
-                btn.onclick = function() {
-                    const realToggle = doc.querySelector('[data-testid="stSidebarCollapsedControl"] button, [data-testid="stExpandSidebarButton"]');
-                    if (realToggle) {
-                        realToggle.click();
-                    } else {
-                        const sidebar = doc.querySelector('[data-testid="stSidebar"]');
-                        if (sidebar) {
-                            const isCollapsed = sidebar.getAttribute('aria-expanded') === 'false';
-                            sidebar.setAttribute('aria-expanded', isCollapsed ? 'true' : 'false');
-                        }
-                    }
-                };
-                doc.body.appendChild(btn);
-            }
-        }
-    }
-
-    applyStyles();
-    new MutationObserver(applyStyles).observe(doc.body, { childList: true, subtree: true });
-    setInterval(applyStyles, 800);
-})();
-</script>
-""", height=0)
 
 # ============================================================
 # INLINE SVG LOGO
@@ -130,15 +63,15 @@ def load_css():
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         }
 
-        /* Hide Streamlit chrome */
+        /* Hide only the noisy chrome — keep header so hamburger shows */
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
-        [data-testid="stToolbar"] { display: none; }
         [data-testid="stDecoration"] { display: none; }
 
+        /* Transparent header so it blends, but stays functional */
         header[data-testid="stHeader"] {
-            background: transparent !important;
-            z-index: 1 !important;
+            background: transparent;
+            box-shadow: none;
         }
 
         .stApp {
@@ -394,7 +327,7 @@ def load_css():
             border-radius: 10px;
             padding: 8px 18px;
             font-weight: 600;
-            font-size: 14px;
+            font-size: 14pxid;
             transition: all 0.15s ease;
             box-shadow: none;
         }
@@ -402,9 +335,9 @@ def load_css():
             background: #f9fafb;
             border-color: #d1d5db;
             color: #111827;
-            transform: translateY(-1px);
+            transform: translateY(-="1px);
         }
-        .stButton > button[kind="primary"] {
+        .stButtonstChatMessage"] > button[kind="primary"] {
             background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%);
             color: #ffffff;
             border: none;
@@ -461,7 +394,7 @@ def load_css():
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
         }
 
-        [data-testid="stChatMessage"] {
+        [data-test {
             background: transparent;
             padding: 20px 0;
             border-bottom: 1px solid #f3f4f6;
@@ -583,7 +516,7 @@ def load_css():
             section.main > div.block-container {
                 padding-left: 0.75rem !important;
                 padding-right: 0.75rem !important;
-                padding-top: 4rem !important;
+                padding-top: 0.75rem !important;
                 padding-bottom: 3rem !important;
                 max-width: 100% !important;
             }
