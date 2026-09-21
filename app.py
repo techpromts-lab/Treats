@@ -6,6 +6,7 @@ import asyncio
 import io
 import base64
 import zipfile
+import re
 import streamlit.components.v1 as components
 from urllib.parse import quote
 from datetime import datetime, date
@@ -13,36 +14,32 @@ from datetime import datetime, date
 # ============================================================
 # PAGE CONFIG
 # ============================================================
-st.set_page_config(
-    page_title="Treats",
-    page_icon="🧠",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="Treats", page_icon="🧠", layout="wide",
+                    initial_sidebar_state="expanded")
 
 TOKEN_LIMIT = 5000
 TOKEN_WARN_AT = 0.8
+
+# Token cost per tool
+TOOL_COSTS = {
+    "tts": 100,        # TTS cost
+    "image": 150,      # Image generation
+    "password": 10,    # Password gen
+    "cv": 0,           # dynamic (real Groq usage)
+    "video": 0,        # dynamic
+}
 
 # ============================================================
 # LOGO
 # ============================================================
 LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
   <defs>
-    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#a855f7"/>
-      <stop offset="100%" stop-color="#6c3ef5"/>
-    </linearGradient>
-    <linearGradient id="g2" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#312e81"/>
-      <stop offset="100%" stop-color="#1e1b4b"/>
-    </linearGradient>
+    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#a855f7"/><stop offset="100%" stop-color="#6c3ef5"/></linearGradient>
+    <linearGradient id="g2" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#312e81"/><stop offset="100%" stop-color="#1e1b4b"/></linearGradient>
   </defs>
-  <ellipse cx="42" cy="22" rx="14" ry="10" fill="url(#g1)"/>
-  <ellipse cx="78" cy="22" rx="14" ry="10" fill="url(#g1)"/>
-  <ellipse cx="42" cy="22" rx="6" ry="4" fill="#fff"/>
-  <ellipse cx="78" cy="22" rx="6" ry="4" fill="#fff"/>
-  <circle cx="14" cy="70" r="12" fill="url(#g1)"/>
-  <circle cx="106" cy="70" r="12" fill="url(#g1)"/>
+  <ellipse cx="42" cy="22" rx="14" ry="10" fill="url(#g1)"/><ellipse cx="78" cy="22" rx="14" ry="10" fill="url(#g1)"/>
+  <ellipse cx="42" cy="22" rx="6" ry="4" fill="#fff"/><ellipse cx="78" cy="22" rx="6" ry="4" fill="#fff"/>
+  <circle cx="14" cy="70" r="12" fill="url(#g1)"/><circle cx="106" cy="70" r="12" fill="url(#g1)"/>
   <rect x="20" y="35" width="80" height="70" rx="30" fill="#f5f3ff"/>
   <rect x="28" y="43" width="64" height="54" rx="24" fill="url(#g2)"/>
   <path d="M42 62 Q46 57 50 62" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>
@@ -55,32 +52,20 @@ LOGO_URI = "data:image/svg+xml;base64," + base64.b64encode(LOGO_SVG.encode()).de
 # SESSION STATE
 # ============================================================
 defaults = {
-    "dark_mode": False,
-    "tokens_used": 0,
-    "token_date": date.today().isoformat(),
-    "dev_mode": False,
-    "show_dev_input": False,
-    "density": "comfortable",
-    "font_size": "medium",
-    "conv_search": "",
-    "rename_conv": None,
-    "warned_80": False,
-    "show_settings": False,
+    "dark_mode": False, "tokens_used": 0, "token_date": date.today().isoformat(),
+    "dev_mode": False, "show_dev_input": False, "density": "comfortable",
+    "font_size": "medium", "conv_search": "", "rename_conv": None,
+    "warned_80": False, "show_settings": False,
 }
 for k, v in defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+    if k not in st.session_state: st.session_state[k] = v
 
-# ============================================================
-# DAILY RESET
-# ============================================================
 def check_daily_reset():
     today = date.today().isoformat()
     if st.session_state.token_date != today:
         st.session_state.token_date = today
         st.session_state.tokens_used = 0
         st.session_state.warned_80 = False
-
 check_daily_reset()
 
 # ============================================================
@@ -90,13 +75,22 @@ def is_unlimited(): return st.session_state.dev_mode
 def can_send():
     if is_unlimited(): return True
     return st.session_state.tokens_used < TOKEN_LIMIT
+def can_use_tool(cost=0):
+    if is_unlimited(): return True
+    return st.session_state.tokens_used + cost <= TOKEN_LIMIT
 def add_tokens(n):
     if not is_unlimited():
         st.session_state.tokens_used += n
         if (st.session_state.tokens_used >= TOKEN_LIMIT * TOKEN_WARN_AT
                 and not st.session_state.warned_80):
             st.session_state.warned_80 = True
-            st.toast(f"⚠️ You've used {int(TOKEN_WARN_AT*100)}% of your daily tokens", icon="⚠️")
+            st.toast(f"⚠️ You've used {int(TOKEN_WARN_AT*100)}% of your daily tokens")
+
+def deduct_tool(cost, tool_name):
+    """Deduct token cost for a tool usage."""
+    if not is_unlimited():
+        st.session_state.tokens_used += cost
+        st.toast(f"💎 {tool_name}: -{cost} tokens", icon="💎")
 
 # ============================================================
 # CSS
@@ -111,10 +105,12 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
         bord="#ececec"; bsoft="#f3f4f6"; txt="#0d0d0d"; tsoft="#6b7280"; tmuted="#9ca3af"
         hov="#ffffff"; act="#ffffff"; bbtn="#ffffff"; bhv="#f9fafb"; bbd="#e5e7eb"; cib="#ffffff"
 
-    fs_base = {"small": "13px", "medium": "15px", "large": "17px"}[font_size]
-    fs_h1 = {"small": "26px", "medium": "30px", "large": "34px"}[font_size]
-    fs_tool = {"small": "22px", "medium": "26px", "large": "30px"}[font_size]
+    fs_base = {"small":"13px","medium":"15px","large":"17px"}[font_size]
+    fs_h1 = {"small":"26px","medium":"30px","large":"34px"}[font_size]
+    fs_tool = {"small":"22px","medium":"26px","large":"30px"}[font_size]
     msg_pad = "12px 0" if density == "compact" else "22px 0"
+    input_txt = "#0d0d0d" if dark else "#0d0d0d"  # always dark inside white input
+    input_bg = "#ffffff"  # force white input in both themes
 
     st.markdown(f"""
     <style>
@@ -232,17 +228,34 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
         [data-testid="stBottom"] {{ width: 100% !important; display: flex !important; justify-content: center !important; }}
         [data-testid="stBottom"] > div {{ max-width: 800px !important; margin: 0 auto !important; }}
 
+        /* ✅ FIX: Chat input — white background with dark text ALWAYS */
+        [data-testid="stChatInput"],
+        [data-testid="stChatInput"] > div,
+        [data-testid="stChatInput"] > div > div {{
+            background: #ffffff !important;
+            background-color: #ffffff !important;
+        }}
         [data-testid="stChatInput"] {{
-            border-radius: 14px !important; border: 1px solid {bbd} !important;
-            background: {cib} !important; box-shadow: 0 4px 16px rgba(108, 62, 245, 0.06) !important;
-            transition: all 0.2s ease !important;
+            border-radius: 14px !important;
+            border: 1px solid #a855f7 !important;
+            box-shadow: 0 4px 16px rgba(108, 62, 245, 0.15) !important;
         }}
-        [data-testid="stChatInput"]:focus-within {{
-            border-color: #a855f7 !important;
-            box-shadow: 0 4px 20px rgba(168, 85, 247, 0.15) !important;
+        [data-testid="stChatInput"] textarea {{
+            background: #ffffff !important;
+            background-color: #ffffff !important;
+            color: #0d0d0d !important;
+            -webkit-text-fill-color: #0d0d0d !important;
+            caret-color: #6c3ef5 !important;
         }}
-        [data-testid="stChatInput"] textarea {{ background: transparent !important; color: {txt} !important; }}
-        [data-testid="stChatInput"] textarea::placeholder {{ color: {tsoft} !important; }}
+        [data-testid="stChatInput"] textarea::placeholder {{
+            color: #6b7280 !important;
+            -webkit-text-fill-color: #6b7280 !important;
+        }}
+        [data-testid="stChatInput"] input {{
+            background: #ffffff !important;
+            color: #0d0d0d !important;
+            -webkit-text-fill-color: #0d0d0d !important;
+        }}
 
         h1, h2, h3, h4, h5, h6 {{ color: {txt} !important; }}
         h1 {{ font-size: {fs_h1} !important; font-weight: 800 !important; letter-spacing: -0.03em !important; }}
@@ -274,29 +287,21 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
         }}
         .stButton > button:hover {{
             background: {bhv}; border-color: #a855f7; color: #6c3ef5;
-            transform: translateY(-1px); box-shadow: 0 2px 8px rgba(108, 62, 245, 0.1);
+            transform: translateY(-1px);
         }}
         .stButton > button[kind="primary"] {{
             background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%);
             color: #ffffff; border: none;
             box-shadow: 0 4px 14px rgba(108, 62, 245, 0.3);
         }}
-        .stButton > button[kind="primary"]:hover {{
-            background: linear-gradient(135deg, #5a2ee0 0%, #9333ea 100%);
-            box-shadow: 0 6px 20px rgba(108, 62, 245, 0.4); color: #ffffff;
-        }}
         .stDownloadButton > button {{
             background: {bbtn}; color: {txt}; border: 1px solid {bbd};
             border-radius: 10px; padding: 8px 16px; font-weight: 600; font-size: 13px;
         }}
-        .stDownloadButton > button:hover {{ background: {bhv}; border-color: #a855f7; color: #6c3ef5; }}
 
         .stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox > div > div {{
             border-radius: 10px !important; border-color: {bbd} !important;
             font-size: 14px !important; background: {surf} !important; color: {txt} !important;
-        }}
-        .stTextInput input:focus, .stTextArea textarea:focus {{
-            border-color: #a855f7 !important; box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.12) !important;
         }}
 
         [data-testid="stForm"] {{
@@ -313,7 +318,6 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
             from {{ opacity: 0; transform: translateY(6px); }}
             to {{ opacity: 1; transform: translateY(0); }}
         }}
-        [data-testid="stChatMessage"]:last-child {{ border-bottom: none; }}
 
         code {{ background: {surf2} !important; color: #a855f7 !important; padding: 3px 8px !important; border-radius: 6px !important; font-weight: 600; }}
         pre {{ background: #1e1b4b !important; border-radius: 14px !important; }}
@@ -333,7 +337,7 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
             font-size: 26px; font-weight: 700; letter-spacing: -0.02em;
             background: linear-gradient(135deg, #1f2937 0%, #6c3ef5 100%);
             -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-            margin-top: 24px; color: {txt};
+            margin-top: 24px;
         }}
         @keyframes float {{
             0%, 100% {{ transform: translateY(0); }}
@@ -348,18 +352,7 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
             font-size: 10px; font-weight: 600; background: {surf2}; color: {tsoft};
             margin-right: 6px;
         }}
-        .time-badge {{
-            display: inline-block; font-size: 10px; color: {tmuted};
-            margin-left: 4px;
-        }}
-
-        .empty-state {{
-            text-align: center; padding: 40px 20px; color: {tsoft};
-            border: 2px dashed {bord}; border-radius: 16px; margin: 20px 0;
-        }}
-        .empty-state .icon {{ font-size: 42px; margin-bottom: 10px; opacity: 0.6; }}
-        .empty-state .title {{ font-size: 16px; font-weight: 600; color: {txt}; margin-bottom: 6px; }}
-        .empty-state .desc {{ font-size: 13px; }}
+        .time-badge {{ display: inline-block; font-size: 10px; color: {tmuted}; margin-left: 4px; }}
 
         @media (max-width: 768px) {{
             [data-testid="stSidebar"] {{ min-width: 84vw !important; max-width: 84vw !important; }}
@@ -369,76 +362,32 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
     </style>
     """, unsafe_allow_html=True)
 
-load_css(
-    dark=st.session_state.dark_mode,
-    density=st.session_state.density,
-    font_size=st.session_state.font_size,
-)
+load_css(dark=st.session_state.dark_mode, density=st.session_state.density, font_size=st.session_state.font_size)
 
 # ============================================================
-# INJECT JS — Force style on sidebar toggle button
+# JS — force sidebar toggle style
 # ============================================================
 components.html("""
 <script>
 (function() {
     const doc = window.parent.document;
-
     function styleToggle() {
-        const selectors = [
-            '[data-testid="stSidebarCollapsedControl"]',
-            '[data-testid="stSidebarCollapseButton"]',
-            '[data-testid="collapsedControl"]',
-            'button[kind="headerNoPadding"]',
-            'button[kind="header"]'
-        ];
-
-        const STYLE = 'background:#6c3ef5 !important;' +
-                      'background-color:#6c3ef5 !important;' +
-                      'background-image:none !important;' +
-                      'color:#ffffff !important;' +
-                      'border:none !important;' +
-                      'border-radius:12px !important;' +
-                      'padding:10px !important;' +
-                      'margin:12px !important;' +
-                      'box-shadow:0 4px 16px rgba(108,62,245,0.5) !important;' +
-                      'z-index:2147483647 !important;' +
-                      'position:fixed !important;' +
-                      'top:8px !important;' +
-                      'left:8px !important;' +
-                      'width:44px !important;' +
-                      'height:44px !important;' +
-                      'display:flex !important;' +
-                      'align-items:center !important;' +
-                      'justify-content:center !important;' +
-                      'cursor:pointer !important;' +
-                      'opacity:1 !important;' +
-                      'visibility:visible !important;';
-
-        selectors.forEach(function(sel) {
-            doc.querySelectorAll(sel).forEach(function(el) {
+        const sels = ['[data-testid="stSidebarCollapsedControl"]','[data-testid="stSidebarCollapseButton"]','[data-testid="collapsedControl"]'];
+        const STYLE = 'background:#6c3ef5 !important;background-color:#6c3ef5 !important;'+
+            'color:#ffffff !important;border:none !important;border-radius:12px !important;'+
+            'padding:10px !important;margin:12px !important;box-shadow:0 4px 16px rgba(108,62,245,0.5) !important;'+
+            'z-index:2147483647 !important;position:fixed !important;top:8px !important;left:8px !important;'+
+            'width:44px !important;height:44px !important;display:flex !important;align-items:center !important;'+
+            'justify-content:center !important;cursor:pointer !important;opacity:1 !important;visibility:visible !important;';
+        sels.forEach(function(sel){
+            doc.querySelectorAll(sel).forEach(function(el){
                 el.style.cssText = STYLE;
-                const btn = el.querySelector('button') || el;
-                if (btn && btn !== el) btn.style.cssText = STYLE;
-                el.querySelectorAll('svg').forEach(function(svg) {
-                    svg.style.fill = '#ffffff';
-                    svg.style.color = '#ffffff';
-                    svg.style.stroke = '#ffffff';
-                    svg.style.width = '22px';
-                    svg.style.height = '22px';
-                });
-                el.querySelectorAll('span').forEach(function(sp) {
-                    sp.style.color = '#ffffff';
-                });
+                el.querySelectorAll('svg').forEach(function(s){ s.style.fill='#fff'; s.style.stroke='#fff'; });
             });
         });
     }
-
     styleToggle();
-    setInterval(styleToggle, 400);
-    try {
-        const observer = new MutationObserver(styleToggle);
-        observer.observe(doc.body, { childList: true, subtree: true });
-    } catch(e) {}
+    setInterval(styleToggle, 500);
 })();
 </script>
 """, height=0)
@@ -457,12 +406,53 @@ def get_client():
 
 AVAILABLE_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"]
 
-SYS_PROMPT = """You are Treats, a helpful, general-purpose AI assistant.
-Friendly, concise, and professional. Never use emojis unless the user uses them first."""
+SYS_PROMPT = """You are Treats, a helpful AI assistant.
+
+IMPORTANT: You have access to tools. If the user asks for:
+- Voice / speech / audio in any language → CALL generate_speech
+- Image / picture / drawing → CALL generate_image
+- CV / resume → CALL build_cv
+- Video script → CALL build_video
+- Password → CALL make_password
+
+Always prefer calling tools over describing them. Be concise. Never use emojis unless the user does."""
 
 TITLE_PROMPT = """Generate a short title (3-5 words). Return ONLY the title.
 
 Message: {message}"""
+
+# Tool schemas for function calling
+TOOLS_SCHEMA = [
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_speech",
+            "description": "Convert text to speech in a specific language",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The text to convert to speech"},
+                    "language": {"type": "string", "enum": ["English", "Arabic", "French", "Spanish", "German"], "description": "Language of the text"}
+                },
+                "required": ["text", "language"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_image",
+            "description": "Generate an image from a text prompt",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Description of the image to generate"}
+                },
+                "required": ["prompt"]
+            }
+        }
+    },
+]
 
 # ============================================================
 # HELPERS
@@ -472,14 +462,14 @@ MAX_CTX = 6000
 def trim_history(msgs, max_tokens=MAX_CTX):
     total = 0; out = []
     for m in reversed(msgs):
-        t = len(m["content"]) // 4
+        t = len(m.get("content","") or "") // 4
         if total + t > max_tokens: break
         out.insert(0, m); total += t
     while out and out[0]["role"] == "assistant": out.pop(0)
     return out
 
-def count_tokens(txt): return max(1, len(txt) // 4)
-def count_words(txt): return len(txt.split())
+def count_tokens(txt): return max(1, len(txt) // 4) if txt else 0
+def count_words(txt): return len(txt.split()) if txt else 0
 
 def get_greeting():
     h = datetime.now().hour
@@ -493,30 +483,14 @@ def fmt_time(iso):
 
 def copy_to_clipboard(text, key):
     js_text = json.dumps(text)
-    components.html(f"""
-    <script>
-    (function() {{
-        var ta = document.createElement('textarea');
-        ta.value = {js_text};
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        try {{ document.execCommand('copy'); }} catch(e) {{}}
-        document.body.removeChild(ta);
-    }})();
-    </script>
-    """, height=0)
+    components.html(f"""<script>(function(){{var ta=document.createElement('textarea');ta.value={js_text};ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();try{{document.execCommand('copy');}}catch(e){{}}document.body.removeChild(ta);}})();</script>""", height=0)
 
 # ============================================================
 # CONVERSATIONS
 # ============================================================
 def init_convs():
     if "conversations" not in st.session_state:
-        st.session_state.conversations = {
-            "default": {"id":"default","title":"New chat","messages":[],
-                        "created": datetime.now().isoformat()}
-        }
+        st.session_state.conversations = {"default": {"id":"default","title":"New chat","messages":[],"created": datetime.now().isoformat()}}
         st.session_state.active_conversation = "default"
 
 def get_msgs():
@@ -529,15 +503,11 @@ def set_msgs(msgs):
 def new_conv():
     init_convs()
     nid = f"c_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-    st.session_state.conversations[nid] = {
-        "id":nid,"title":"New chat","messages":[],
-        "created": datetime.now().isoformat()
-    }
+    st.session_state.conversations[nid] = {"id":nid,"title":"New chat","messages":[],"created": datetime.now().isoformat()}
     st.session_state.active_conversation = nid
 
 def del_conv(cid):
-    if cid in st.session_state.conversations:
-        del st.session_state.conversations[cid]
+    if cid in st.session_state.conversations: del st.session_state.conversations[cid]
     if st.session_state.active_conversation == cid:
         keys = list(st.session_state.conversations.keys())
         st.session_state.active_conversation = keys[0] if keys else None
@@ -547,22 +517,15 @@ def dup_conv(cid):
     if cid in st.session_state.conversations:
         src = st.session_state.conversations[cid]
         nid = f"c_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-        st.session_state.conversations[nid] = {
-            "id":nid,
-            "title": src["title"] + " (copy)",
-            "messages": [dict(m) for m in src["messages"]],
-            "created": datetime.now().isoformat()
-        }
+        st.session_state.conversations[nid] = {"id":nid,"title": src["title"] + " (copy)","messages": [dict(m) for m in src["messages"]],"created": datetime.now().isoformat()}
         st.session_state.active_conversation = nid
 
 def auto_title(msg):
     try:
         c = get_client()
-        r = c.chat.completions.create(
-            model="openai/gpt-oss-20b",
+        r = c.chat.completions.create(model="openai/gpt-oss-20b",
             messages=[{"role":"user","content":TITLE_PROMPT.format(message=msg[:300])}],
-            temperature=0.3, max_tokens=20,
-        )
+            temperature=0.3, max_tokens=20)
         t = r.choices[0].message.content.strip().strip('"').strip("'")
         return t[:40] if t else msg[:30]
     except:
@@ -587,8 +550,7 @@ def fetch_img_models():
 def gen_image(prompt, w=1024, h=1024, model="flux", seed=None, enhance=True, nologo=True):
     if not prompt or not prompt.strip(): raise TreatsError("Please enter a prompt.")
     url = f"https://image.pollinations.ai/prompt/{quote(prompt.strip())}"
-    p = {"width":w,"height":h,"model":model,
-         "seed":seed if seed is not None else -1,
+    p = {"width":w,"height":h,"model":model,"seed":seed if seed is not None else -1,
          "nologo":str(nologo).lower(),"enhance":str(enhance).lower()}
     try:
         r = requests.get(url, params=p, timeout=60)
@@ -625,8 +587,22 @@ async def _tts(text, voice, rate, pitch, volume):
         if ch["type"] == "audio": buf.write(ch["data"])
     return buf.getvalue()
 
+LANG_CODE = {"English":"en","Arabic":"ar","French":"fr","Spanish":"es","German":"de"}
+
+def tts_speak(text, language="English", rate_val=1.0, pitch_val=0, vol_val=100):
+    """Helper to generate TTS from chat."""
+    lang_code = LANG_CODE.get(language, "en")
+    voices = fetch_voices()
+    pool = voices.get(lang_code, [])
+    if not pool: raise TreatsError(f"No voices for {language}")
+    voice = pool[0]
+    rate = f"{'+' if rate_val >= 1 else ''}{int((rate_val - 1) * 100)}%"
+    pitch = f"{'+' if pitch_val >= 0 else ''}{pitch_val}Hz"
+    vol = f"+{vol_val}%"
+    return asyncio.run(_tts(text, voice, rate, pitch, vol))
+
 # ============================================================
-# TOOL ICONS
+# TOOL ICONS + HEADER
 # ============================================================
 ICONS = {
     "chat": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>""",
@@ -638,69 +614,44 @@ ICONS = {
 }
 
 def tool_header(k, title, sub):
-    st.markdown(
-        f'<div class="tool-header theme-{k}"><div class="icon">{ICONS[k]}</div>'
-        f'<div class="title-block"><h1>{title}</h1><p>{sub}</p></div></div>'
-        f'<div style="height:24px"></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="tool-header theme-{k}"><div class="icon">{ICONS[k]}</div><div class="title-block"><h1>{title}</h1><p>{sub}</p></div></div><div style="height:24px"></div>', unsafe_allow_html=True)
 
 # ============================================================
 # SIDEBAR
 # ============================================================
 init_convs()
 
-TOOLS = {
-    "Chat":"chat","CV Builder":"cv","Password Generator":"password",
-    "Video Script":"video","Text to Speech":"tts","Image Generator":"photo",
-}
+TOOLS = {"Chat":"chat","CV Builder":"cv","Password Generator":"password",
+         "Video Script":"video","Text to Speech":"tts","Image Generator":"photo"}
 
 with st.sidebar:
-    st.markdown(
-        f'<div class="treats-brand"><img src="{LOGO_URI}" alt="Treats">'
-        f'<span class="name">Treats</span></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="treats-brand"><img src="{LOGO_URI}" alt="Treats"><span class="name">Treats</span></div>', unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns([2, 1, 1])
-    with c1:
-        st.markdown('<div class="sidebar-label" style="padding-top:0;">Display</div>', unsafe_allow_html=True)
+    with c1: st.markdown('<div class="sidebar-label" style="padding-top:0;">Display</div>', unsafe_allow_html=True)
     with c2:
-        if st.button("🌙" if not st.session_state.dark_mode else "☀️", key="thm", help="Toggle theme"):
-            st.session_state.dark_mode = not st.session_state.dark_mode
-            st.rerun()
+        if st.button("🌙" if not st.session_state.dark_mode else "☀️", key="thm"):
+            st.session_state.dark_mode = not st.session_state.dark_mode; st.rerun()
     with c3:
-        if st.button("⚙️", key="settings", help="Settings"):
+        if st.button("⚙️", key="settings"):
             st.session_state.show_settings = not st.session_state.get("show_settings", False)
 
     if st.session_state.get("show_settings", False):
-        density = st.selectbox("Density", ["comfortable","compact"],
-                                index=0 if st.session_state.density=="comfortable" else 1,
-                                key="dens_sel")
-        if density != st.session_state.density:
-            st.session_state.density = density; st.rerun()
-        fsize = st.selectbox("Font size", ["small","medium","large"],
-                              index={"small":0,"medium":1,"large":2}[st.session_state.font_size],
-                              key="fs_sel")
-        if fsize != st.session_state.font_size:
-            st.session_state.font_size = fsize; st.rerun()
+        density = st.selectbox("Density", ["comfortable","compact"], index=0 if st.session_state.density=="comfortable" else 1, key="dens_sel")
+        if density != st.session_state.density: st.session_state.density = density; st.rerun()
+        fsize = st.selectbox("Font size", ["small","medium","large"], index={"small":0,"medium":1,"large":2}[st.session_state.font_size], key="fs_sel")
+        if fsize != st.session_state.font_size: st.session_state.font_size = fsize; st.rerun()
 
     st.markdown('<div class="sidebar-label">Usage</div>', unsafe_allow_html=True)
     if is_unlimited():
-        st.markdown(
-            f'<div class="token-panel"><div class="row"><span>Status</span><span class="dev">Developer</span></div>'
-            f'<div class="row"><span>Limit</span><span class="dev">Unlimited</span></div>'
-            f'<div class="row"><span>Used</span><span class="val">{st.session_state.tokens_used:,}</span></div></div>',
-            unsafe_allow_html=True)
+        st.markdown(f'<div class="token-panel"><div class="row"><span>Status</span><span class="dev">Developer</span></div><div class="row"><span>Limit</span><span class="dev">Unlimited</span></div><div class="row"><span>Used</span><span class="val">{st.session_state.tokens_used:,}</span></div></div>', unsafe_allow_html=True)
     else:
-        used = st.session_state.tokens_used
-        rem = max(0, TOKEN_LIMIT - used)
+        used = st.session_state.tokens_used; rem = max(0, TOKEN_LIMIT - used)
         pct = min(100, int((used / TOKEN_LIMIT) * 100))
         if pct >= 90: bc, sc, stt = "#ef4444","danger","Critical"
         elif pct >= 70: bc, sc, stt = "#f59e0b","warn","Warning"
         else: bc, sc, stt = "#10b981","dev","Active"
-        st.markdown(
-            f'<div class="token-panel"><div class="row"><span>Status</span><span class="{sc}">{stt}</span></div>'
-            f'<div class="row"><span>Used</span><span class="val">{used:,} / {TOKEN_LIMIT:,}</span></div>'
-            f'<div class="row"><span>Remaining</span><span class="val">{rem:,}</span></div>'
-            f'<div class="token-bar-wrap"><div class="token-bar-fill" style="width:{pct}%;background:{bc};"></div></div></div>',
-            unsafe_allow_html=True)
+        st.markdown(f'<div class="token-panel"><div class="row"><span>Status</span><span class="{sc}">{stt}</span></div><div class="row"><span>Used</span><span class="val">{used:,} / {TOKEN_LIMIT:,}</span></div><div class="row"><span>Remaining</span><span class="val">{rem:,}</span></div><div class="token-bar-wrap"><div class="token-bar-fill" style="width:{pct}%;background:{bc};"></div></div></div>', unsafe_allow_html=True)
 
     st.markdown('<div class="sidebar-label">Tools</div>', unsafe_allow_html=True)
     choice = st.radio("nav", list(TOOLS.keys()), label_visibility="collapsed", key="nav")
@@ -708,16 +659,10 @@ with st.sidebar:
 
     if tool == "chat":
         st.markdown('<div class="sidebar-label">Conversations</div>', unsafe_allow_html=True)
-        if st.button("+ New chat", key="nc", use_container_width=True):
-            new_conv(); st.rerun()
-
-        search = st.text_input("search", placeholder="🔍 Search...",
-                                label_visibility="collapsed", key="conv_search")
-
+        if st.button("+ New chat", key="nc", use_container_width=True): new_conv(); st.rerun()
+        search = st.text_input("search", placeholder="🔍 Search...", label_visibility="collapsed", key="conv_search")
         items = list(st.session_state.conversations.items())
-        if search:
-            items = [(c, v) for c, v in items if search.lower() in v["title"].lower()]
-
+        if search: items = [(c, v) for c, v in items if search.lower() in v["title"].lower()]
         for cid, conv in items:
             act = cid == st.session_state.active_conversation
             lbl = f"{'● ' if act else ''}{conv['title'][:24]}"
@@ -726,37 +671,27 @@ with st.sidebar:
                 if st.button(lbl, key=f"c_{cid}", use_container_width=True):
                     st.session_state.active_conversation = cid; st.rerun()
             with col2:
-                if st.button("✎", key=f"r_{cid}", help="Rename"):
-                    st.session_state.rename_conv = cid; st.rerun()
+                if st.button("✎", key=f"r_{cid}"): st.session_state.rename_conv = cid; st.rerun()
             with col3:
-                if st.button("×", key=f"d_{cid}", help="Delete"):
-                    del_conv(cid); st.rerun()
-
+                if st.button("×", key=f"d_{cid}"): del_conv(cid); st.rerun()
             if st.session_state.rename_conv == cid:
                 with st.form(f"ren_{cid}"):
-                    new_title = st.text_input("New title", value=conv["title"],
-                                                label_visibility="collapsed",
-                                                key=f"nt_{cid}")
+                    new_title = st.text_input("New title", value=conv["title"], label_visibility="collapsed", key=f"nt_{cid}")
                     sc1, sc2 = st.columns(2)
                     with sc1:
                         if st.form_submit_button("Save", use_container_width=True):
-                            st.session_state.conversations[cid]["title"] = new_title[:40]
-                            st.session_state.rename_conv = None; st.rerun()
+                            st.session_state.conversations[cid]["title"] = new_title[:40]; st.session_state.rename_conv = None; st.rerun()
                     with sc2:
                         if st.form_submit_button("Cancel", use_container_width=True):
                             st.session_state.rename_conv = None; st.rerun()
-
         if len(st.session_state.conversations) > 1:
             if st.button("📦 Export all (ZIP)", key="exp_all", use_container_width=True):
                 buf = io.BytesIO()
                 with zipfile.ZipFile(buf, "w") as z:
                     for c, v in st.session_state.conversations.items():
                         safe = "".join(ch for ch in v["title"] if ch.isalnum() or ch in " -_")[:30]
-                        z.writestr(f"{safe or c}.json",
-                                    json.dumps(v["messages"], ensure_ascii=False, indent=2))
-                st.download_button("⬇️ Download ZIP", buf.getvalue(),
-                                    f"treats_all_{datetime.now():%Y%m%d}.zip",
-                                    "application/zip", use_container_width=True)
+                        z.writestr(f"{safe or c}.json", json.dumps(v["messages"], ensure_ascii=False, indent=2))
+                st.download_button("⬇️ Download ZIP", buf.getvalue(), f"treats_all_{datetime.now():%Y%m%d}.zip", "application/zip", use_container_width=True)
 
     st.markdown('<div class="sidebar-label">AI Model</div>', unsafe_allow_html=True)
     model = st.selectbox("m", AVAILABLE_MODELS, key="mdl", label_visibility="collapsed")
@@ -764,29 +699,20 @@ with st.sidebar:
     dev_label = "🔓 Dev: ON" if st.session_state.dev_mode else "Developer"
     if st.button(dev_label, key="dev_btn", use_container_width=True):
         if st.session_state.dev_mode:
-            st.session_state.dev_mode = False
-            st.session_state.show_dev_input = False; st.rerun()
+            st.session_state.dev_mode = False; st.session_state.show_dev_input = False; st.rerun()
         else:
             st.session_state.show_dev_input = not st.session_state.show_dev_input; st.rerun()
 
     if st.session_state.show_dev_input and not st.session_state.dev_mode:
         with st.form("dev_f", clear_on_submit=True):
-            pwd = st.text_input("p", type="password", placeholder="Password",
-                                 label_visibility="collapsed")
+            pwd = st.text_input("p", type="password", placeholder="Password", label_visibility="collapsed")
             if st.form_submit_button("Unlock", use_container_width=True):
                 if pwd == st.secrets.get("DEV_PASSWORD", ""):
-                    st.session_state.dev_mode = True
-                    st.session_state.show_dev_input = False
-                    st.toast("Developer mode enabled", icon="✅"); st.rerun()
+                    st.session_state.dev_mode = True; st.session_state.show_dev_input = False
+                    st.toast("Developer mode enabled"); st.rerun()
                 else: st.error("Wrong password")
 
-    st.markdown(
-        '<div class="sidebar-footer">'
-        '<strong>Treats v3.0</strong><br>'
-        'Powered by Groq<br><br>'
-        '<span class="kbd">Enter</span> send · '
-        '<span class="kbd">Shift+Enter</span> new line'
-        '</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-footer"><strong>Treats v3.1</strong><br>Powered by Groq<br><br><span class="kbd">Enter</span> send · <span class="kbd">Shift+Enter</span> new line</div>', unsafe_allow_html=True)
 
 # ============================================================
 # CHAT
@@ -804,23 +730,13 @@ def render_chat():
     msgs = get_msgs()
 
     if not can_send():
-        st.markdown(
-            '<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;'
-            'padding:16px 20px;border-radius:12px;margin-bottom:20px;">'
-            f'<strong>Daily limit reached</strong><br>'
-            f'You used {st.session_state.tokens_used:,} / {TOKEN_LIMIT:,} tokens.<br>'
-            'Resets tomorrow at midnight.</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:16px 20px;border-radius:12px;margin-bottom:20px;"><strong>Daily limit reached</strong><br>You used {st.session_state.tokens_used:,} / {TOKEN_LIMIT:,} tokens.<br>Resets tomorrow at midnight.</div>', unsafe_allow_html=True)
         for m in msgs:
             with st.chat_message(m["role"]): st.markdown(m["content"])
         return
 
     if not msgs:
-        st.markdown(
-            f'<div class="treats-hero">'
-            f'<img src="{LOGO_URI}" class="hero-logo">'
-            f'<div class="greeting">{get_greeting()}. How can I help you?</div>'
-            f'</div>', unsafe_allow_html=True)
-
+        st.markdown(f'<div class="treats-hero"><img src="{LOGO_URI}" class="hero-logo"><div class="greeting">{get_greeting()}. How can I help you?</div></div>', unsafe_allow_html=True)
         with st.expander("💡 Prompt Library"):
             cols = st.columns(3)
             for i, (l, t) in enumerate(PROMPTS):
@@ -828,55 +744,57 @@ def render_chat():
                     if st.button(l, key=f"p_{i}", use_container_width=True):
                         st.session_state.pl_template = t; st.rerun()
 
+    # Render messages
     for i, m in enumerate(msgs):
         with st.chat_message(m["role"]):
-            st.markdown(m["content"])
+            # Tool result types
+            mtype = m.get("type", "text")
+
+            if mtype == "audio":
+                st.markdown(m.get("content", ""))
+                if "audio_bytes" in m:
+                    st.audio(m["audio_bytes"], format="audio/mp3")
+                    st.download_button("⬇️ MP3", m["audio_bytes"], f"tts_{i}.mp3", "audio/mpeg", key=f"dl_tts_{i}")
+            elif mtype == "image":
+                st.markdown(m.get("content", ""))
+                if "image_bytes" in m:
+                    st.image(m["image_bytes"])
+                    st.download_button("⬇️ PNG", m["image_bytes"], f"img_{i}.png", "image/png", key=f"dl_img_{i}")
+            else:
+                st.markdown(m["content"])
 
             if m["role"] == "assistant":
                 ts = fmt_time(m.get("ts", ""))
-                tok = count_tokens(m["content"])
-                wc = count_words(m["content"])
-                st.markdown(
-                    f'<span class="token-badge">{tok} tokens</span>'
-                    f'<span class="token-badge">{wc} words</span>'
-                    f'<span class="time-badge">{ts}</span>',
-                    unsafe_allow_html=True)
-
+                tok = count_tokens(m.get("content", ""))
+                if tok:
+                    st.markdown(f'<span class="token-badge">{tok} tokens</span><span class="time-badge">{ts}</span>', unsafe_allow_html=True)
                 c1, c2, c3, _ = st.columns([1, 1, 1, 7])
                 with c1:
                     if st.button("📋 Copy", key=f"cp_{i}"):
-                        copy_to_clipboard(m["content"], f"cp_{i}")
-                        st.toast("Copied!", icon="✅")
+                        copy_to_clipboard(m.get("content",""), f"cp_{i}"); st.toast("Copied!")
                 with c2:
                     if i == len(msgs) - 1:
                         if st.button("🔄 Retry", key=f"rg_{i}"):
                             set_msgs(msgs[:i]); st.rerun()
                 with c3:
-                    if st.button("🗑", key=f"dl_{i}", help="Delete"):
-                        new_msgs = msgs[:i] + msgs[i+1:]
-                        set_msgs(new_msgs); st.rerun()
+                    if st.button("🗑", key=f"dl_{i}"):
+                        set_msgs(msgs[:i] + msgs[i+1:]); st.rerun()
 
     if msgs:
         c1, c2, c3 = st.columns([1, 1, 1])
         with c1:
-            if st.button("New chat", key="nci", use_container_width=True):
-                new_conv(); st.rerun()
+            if st.button("New chat", key="nci", use_container_width=True): new_conv(); st.rerun()
         with c2:
-            if st.button("Duplicate", key="dup", use_container_width=True):
-                dup_conv(st.session_state.active_conversation); st.rerun()
+            if st.button("Duplicate", key="dup", use_container_width=True): dup_conv(st.session_state.active_conversation); st.rerun()
         with c3:
             with st.expander("Export"):
                 a, b = st.columns(2)
                 with a:
-                    md = "\n\n".join(f"**{m['role']}:** {m['content']}" for m in msgs)
-                    st.download_button("MD", md,
-                        f"treats_{datetime.now():%Y%m%d}.md",
-                        "text/markdown", use_container_width=True)
+                    md = "\n\n".join(f"**{m['role']}:** {m.get('content','')}" for m in msgs)
+                    st.download_button("MD", md, f"treats_{datetime.now():%Y%m%d}.md", "text/markdown", use_container_width=True)
                 with b:
-                    st.download_button("JSON",
-                        json.dumps(msgs, ensure_ascii=False, indent=2),
-                        f"treats_{datetime.now():%Y%m%d}.json",
-                        "application/json", use_container_width=True)
+                    clean = [{"role": m["role"], "content": m.get("content","")} for m in msgs]
+                    st.download_button("JSON", json.dumps(clean, ensure_ascii=False, indent=2), f"treats_{datetime.now():%Y%m%d}.json", "application/json", use_container_width=True)
 
     prompt = st.chat_input("Message Treats...")
     if prompt:
@@ -888,73 +806,144 @@ def render_chat():
             st.session_state.conversations[cid]["title"] = auto_title(prompt)
         st.rerun()
 
+    # Generate response with tool calling
     if msgs and msgs[-1]["role"] == "user":
         try:
             client = get_client()
-            clean_msgs = [{"role": m["role"], "content": m["content"]} for m in msgs]
-            full = [{"role":"system","content":SYS_PROMPT}] + clean_msgs
+            # Build clean message list for Groq
+            clean = []
+            for m in msgs:
+                c = {"role": m["role"], "content": m.get("content","")}
+                if c["content"]: clean.append(c)
+            full = [{"role":"system","content":SYS_PROMPT}] + clean
             hist = trim_history(full)
 
-            stream = client.chat.completions.create(
+            # First call — with tools
+            response = client.chat.completions.create(
                 model=model,
                 messages=hist,
                 temperature=0.7,
-                stream=True,
+                tools=TOOLS_SCHEMA,
+                tool_choice="auto",
             )
 
+            msg_obj = response.choices[0].message
+
+            # Check for tool calls
+            if hasattr(msg_obj, "tool_calls") and msg_obj.tool_calls:
+                for tc in msg_obj.tool_calls:
+                    fn = tc.function.name
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except:
+                        args = {}
+
+                    if fn == "generate_speech":
+                        text = args.get("text", "")
+                        lang = args.get("language", "English")
+                        cost = TOOL_COSTS["tts"]
+                        if not can_use_tool(cost):
+                            msgs.append({"role":"assistant","content":"⚠️ Not enough tokens for TTS.","ts": datetime.now().isoformat()})
+                            set_msgs(msgs); st.rerun()
+                        with st.chat_message("assistant"):
+                            with st.spinner(f"Generating {lang} speech..."):
+                                try:
+                                    audio_bytes = tts_speak(text, lang)
+                                    deduct_tool(cost, "TTS")
+                                    msgs.append({
+                                        "role":"assistant",
+                                        "content": f"🔊 **Audio generated** ({lang}):\n\n> {text}",
+                                        "type":"audio",
+                                        "audio_bytes": audio_bytes,
+                                        "ts": datetime.now().isoformat()
+                                    })
+                                    set_msgs(msgs); st.rerun()
+                                except Exception as e:
+                                    msgs.append({"role":"assistant","content":f"❌ TTS failed: {e}","ts": datetime.now().isoformat()})
+                                    set_msgs(msgs); st.rerun()
+
+                    elif fn == "generate_image":
+                        prompt_txt = args.get("prompt", "")
+                        cost = TOOL_COSTS["image"]
+                        if not can_use_tool(cost):
+                            msgs.append({"role":"assistant","content":"⚠️ Not enough tokens for image.","ts": datetime.now().isoformat()})
+                            set_msgs(msgs); st.rerun()
+                        with st.chat_message("assistant"):
+                            with st.spinner("Generating image..."):
+                                try:
+                                    img_bytes = gen_image(prompt_txt, 1024, 1024, "flux")
+                                    deduct_tool(cost, "Image")
+                                    msgs.append({
+                                        "role":"assistant",
+                                        "content": f"🎨 **Image generated:**\n\n> {prompt_txt}",
+                                        "type":"image",
+                                        "image_bytes": img_bytes,
+                                        "ts": datetime.now().isoformat()
+                                    })
+                                    set_msgs(msgs); st.rerun()
+                                except Exception as e:
+                                    msgs.append({"role":"assistant","content":f"❌ Image failed: {e}","ts": datetime.now().isoformat()})
+                                    set_msgs(msgs); st.rerun()
+                return
+
+            # No tool call — stream normal response
+            stream = client.chat.completions.create(
+                model=model, messages=hist, temperature=0.7, stream=True
+            )
             with st.chat_message("assistant"):
-                ph = st.empty()
-                full_txt = ""
+                ph = st.empty(); full_txt = ""
                 for ch in stream:
                     if ch.choices and ch.choices[0].delta.content:
                         full_txt += ch.choices[0].delta.content
                         ph.markdown(full_txt + "▌")
                 ph.markdown(full_txt)
 
-            total_t = sum(count_tokens(m["content"]) for m in hist) + count_tokens(full_txt)
+            total_t = sum(count_tokens(m.get("content","")) for m in hist) + count_tokens(full_txt)
             add_tokens(total_t)
-
             msgs.append({"role":"assistant","content":full_txt,"ts": datetime.now().isoformat()})
-            set_msgs(msgs)
-            st.rerun()
+            set_msgs(msgs); st.rerun()
+
         except TreatsError as e: st.error(str(e))
-        except Exception as e: st.error(f"Error: {e}")
+        except Exception as e:
+            # If tools fail (model doesn't support), fall back to plain streaming
+            try:
+                stream = client.chat.completions.create(model=model, messages=hist, temperature=0.7, stream=True)
+                with st.chat_message("assistant"):
+                    ph = st.empty(); full_txt = ""
+                    for ch in stream:
+                        if ch.choices and ch.choices[0].delta.content:
+                            full_txt += ch.choices[0].delta.content
+                            ph.markdown(full_txt + "▌")
+                    ph.markdown(full_txt)
+                add_tokens(sum(count_tokens(m.get("content","")) for m in hist) + count_tokens(full_txt))
+                msgs.append({"role":"assistant","content":full_txt,"ts": datetime.now().isoformat()})
+                set_msgs(msgs); st.rerun()
+            except Exception as e2: st.error(f"Error: {e2}")
 
 # ============================================================
 # CV
 # ============================================================
-CV_TPL = {
-    "Modern":"modern two-column with colored header",
-    "Classic":"traditional professional",
-    "Creative":"creative with unique styling",
-}
+CV_TPL = {"Modern":"modern two-column with colored header","Classic":"traditional professional","Creative":"creative with unique styling"}
 
 def render_cv():
     tool_header("cv","CV Builder","Generate a professional CV in seconds")
     if not can_send(): st.warning("Limit reached."); return
-
     tpl = st.radio("Template", list(CV_TPL.keys()), horizontal=True)
     with st.form("cv_f"):
         c1, c2 = st.columns(2)
         with c1:
-            name = st.text_input("Full Name")
-            role = st.text_input("Target Role")
-            edu = st.text_input("Education")
+            name = st.text_input("Full Name"); role = st.text_input("Target Role"); edu = st.text_input("Education")
         with c2:
-            lang = st.selectbox("Language",["English","Arabic"])
-            tone = st.selectbox("Tone",["Professional","Concise","Academic"])
-            skills = st.text_input("Skills (comma-separated)")
+            lang = st.selectbox("Language",["English","Arabic"]); tone = st.selectbox("Tone",["Professional","Concise","Academic"]); skills = st.text_input("Skills (comma-separated)")
         exp = st.text_area("Experience", placeholder="One bullet per line", height=140)
         sub = st.form_submit_button("✨ Generate CV", type="primary", use_container_width=True)
-
     if sub:
         if not name or not role: st.warning("Name and role required."); return
         try:
             client = get_client()
             p = f"Write a CV in {lang}, {tone} tone. Style: {CV_TPL[tpl]}.\nName:{name}\nRole:{role}\nExperience:{exp}\nEducation:{edu}\nSkills:{skills}\nMarkdown."
             with st.spinner("Generating..."):
-                r = client.chat.completions.create(model="openai/gpt-oss-120b",
-                    messages=[{"role":"user","content":p}], temperature=0.6)
+                r = client.chat.completions.create(model="openai/gpt-oss-120b", messages=[{"role":"user","content":p}], temperature=0.6)
             txt = r.choices[0].message.content
             if r.usage: add_tokens(r.usage.total_tokens)
             st.markdown("---"); st.markdown(txt)
@@ -977,7 +966,10 @@ def render_password():
     if un: ch += string.digits
     if us: ch += "!@#$%^&*()-_=+"
     if st.button("🎲 Generate", type="primary", use_container_width=True):
+        cost = TOOL_COSTS["password"]
+        if not can_use_tool(cost): st.warning("Not enough tokens."); return
         pwd = "".join(random.choice(ch) for _ in range(ln))
+        deduct_tool(cost, "Password")
         st.code(pwd, language=None)
         st.download_button("⬇️ Download", pwd, "password.txt", use_container_width=True)
 
@@ -991,11 +983,9 @@ def render_video():
         topic = st.text_input("Topic")
         c1, c2 = st.columns(2)
         with c1:
-            dur = st.selectbox("Duration",["30 seconds","60 seconds","3 minutes","5 minutes"])
-            lang = st.selectbox("Language",["English","Arabic"])
+            dur = st.selectbox("Duration",["30 seconds","60 seconds","3 minutes","5 minutes"]); lang = st.selectbox("Language",["English","Arabic"])
         with c2:
-            sty = st.selectbox("Style",["Educational","Promotional","Storytelling","Entertainment"])
-            plat = st.selectbox("Platform",["YouTube","TikTok","Instagram","LinkedIn"])
+            sty = st.selectbox("Style",["Educational","Promotional","Storytelling","Entertainment"]); plat = st.selectbox("Platform",["YouTube","TikTok","Instagram","LinkedIn"])
         sub = st.form_submit_button("🎬 Generate", type="primary", use_container_width=True)
     if sub:
         if not topic: st.warning("Enter a topic."); return
@@ -1003,8 +993,7 @@ def render_video():
             client = get_client()
             p = f"Video script in {lang} for {plat}. Topic:{topic}. Duration:{dur}. Style:{sty}. Storyboard."
             with st.spinner("Generating..."):
-                r = client.chat.completions.create(model="openai/gpt-oss-120b",
-                    messages=[{"role":"user","content":p}], temperature=0.7)
+                r = client.chat.completions.create(model="openai/gpt-oss-120b", messages=[{"role":"user","content":p}], temperature=0.7)
             s = r.choices[0].message.content
             if r.usage: add_tokens(r.usage.total_tokens)
             st.markdown("---"); st.markdown(s)
@@ -1033,9 +1022,12 @@ def render_tts():
     vol = f"+{vv}%"
     if st.button("🔊 Generate Audio", type="primary", use_container_width=True):
         if not text.strip(): st.warning("Enter text."); return
+        cost = TOOL_COSTS["tts"]
+        if not can_use_tool(cost): st.warning("Not enough tokens."); return
         try:
             with st.spinner("Generating..."):
                 a = asyncio.run(_tts(text, voice, rate, pitch, vol))
+            deduct_tool(cost, "TTS")
             st.audio(a, format="audio/mp3")
             st.download_button("⬇️ MP3", a, "tts.mp3", "audio/mpeg", use_container_width=True)
         except Exception as e: st.error(f"Failed: {e}")
@@ -1050,11 +1042,9 @@ def render_photo():
     pr = st.text_area("Prompt", placeholder="A cat in Paris, cinematic lighting, 4K", height=110)
     c1, c2, c3 = st.columns(3)
     with c1: m = st.selectbox("Model", models, key="pm")
-    with c2: asp = st.selectbox("Aspect",
-        ["1:1 (1024×1024)","16:9 (1344×768)","9:16 (768×1344)","4:3 (1152×896)"], key="pa")
+    with c2: asp = st.selectbox("Aspect", ["1:1 (1024×1024)","16:9 (1344×768)","9:16 (768×1344)","4:3 (1152×896)"], key="pa")
     with c3: enh = st.checkbox("Auto-enhance", value=True, key="pe")
-    d = {"1:1 (1024×1024)":(1024,1024),"16:9 (1344×768)":(1344,768),
-         "9:16 (768×1344)":(768,1344),"4:3 (1152×896)":(1152,896)}
+    d = {"1:1 (1024×1024)":(1024,1024),"16:9 (1344×768)":(1344,768),"9:16 (768×1344)":(768,1344),"4:3 (1152×896)":(1152,896)}
     w, h = d[asp]
     c1, c2 = st.columns([3,1])
     with c1: sd = st.number_input("Seed (0 = random)", min_value=0, value=0, step=1, key="ps")
@@ -1065,28 +1055,28 @@ def render_photo():
     seed = int(sd) if sd > 0 else None
     if st.button("🎨 Generate Image", type="primary", use_container_width=True):
         if not pr.strip(): st.warning("Enter a prompt."); return
+        cost = TOOL_COSTS["image"]
+        if not can_use_tool(cost): st.warning("Not enough tokens."); return
         try:
             with st.spinner("Generating..."):
                 img = gen_image(pr, w, h, m, seed, enh)
+            deduct_tool(cost, "Image")
             st.session_state.li = img; st.session_state.lp = pr
             st.session_state.gallery.append({"p":pr,"b":img,"t":datetime.now().isoformat()})
-            st.toast("Image generated!", icon="🎨")
+            st.toast("Image generated!")
         except TreatsError as e: st.error(str(e))
         except Exception as e: st.error(f"Error: {e}")
     if "li" in st.session_state:
-        st.markdown("---")
-        st.image(st.session_state.li, caption=st.session_state.get("lp",""))
+        st.markdown("---"); st.image(st.session_state.li, caption=st.session_state.get("lp",""))
         c1, c2 = st.columns(2)
-        with c1:
-            st.download_button("⬇️ PNG", st.session_state.li,
-                f"treats_{datetime.now():%Y%m%d_%H%M%S}.png",
-                "image/png", use_container_width=True)
+        with c1: st.download_button("⬇️ PNG", st.session_state.li, f"treats_{datetime.now():%Y%m%d_%H%M%S}.png", "image/png", use_container_width=True)
         with c2:
             if st.button("🔄 Regenerate", use_container_width=True):
+                if not can_use_tool(TOOL_COSTS["image"]): st.warning("Not enough tokens."); return
                 try:
                     with st.spinner("Regenerating..."):
-                        img = gen_image(st.session_state.lp, w, h, m,
-                                        random.randint(1,999999), enh)
+                        img = gen_image(st.session_state.lp, w, h, m, random.randint(1,999999), enh)
+                    deduct_tool(TOOL_COSTS["image"], "Image")
                     st.session_state.li = img; st.rerun()
                 except TreatsError as e: st.error(str(e))
     if st.session_state.gallery:
