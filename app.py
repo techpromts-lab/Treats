@@ -131,18 +131,6 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
             background: {bg} !important; color: {txt} !important;
         }}
 
-        @media (min-width: 769px) {{
-            [data-testid="stSidebarCollapseButton"], [data-testid="stSidebarCollapsedControl"],
-            [data-testid="collapsedControl"] {{ display: none !important; }}
-        }}
-        @media (max-width: 768px) {{
-            [data-testid="stSidebarCollapseButton"], [data-testid="stSidebarCollapsedControl"],
-            [data-testid="collapsedControl"] {{
-                display: flex !important; color: #6c3ef5 !important; z-index: 999999 !important;
-            }}
-            [data-testid="collapsedControl"] svg {{ fill: #6c3ef5 !important; }}
-        }}
-
         * {{ -webkit-tap-highlight-color: transparent; }}
         button, .stButton, .stDownloadButton, label, h1,h2,h3,h4,h5,h6,
         .tool-header, .treats-brand, .sidebar-footer, .treats-hero, [data-testid="stSidebar"] {{
@@ -372,6 +360,57 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
         .empty-state .icon {{ font-size: 42px; margin-bottom: 10px; opacity: 0.6; }}
         .empty-state .title {{ font-size: 16px; font-weight: 600; color: {txt}; margin-bottom: 6px; }}
         .empty-state .desc {{ font-size: 13px; }}
+
+        /* ============================================================
+           SIDEBAR TOGGLE — prominent purple button in BOTH themes
+           ============================================================ */
+        [data-testid="stSidebarCollapsedControl"],
+        [data-testid="stSidebarCollapseButton"],
+        [data-testid="collapsedControl"] {{
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            background: #6c3ef5 !important;
+            background-image: none !important;
+            color: #ffffff !important;
+            border: none !important;
+            border-radius: 12px !important;
+            padding: 10px !important;
+            margin: 12px !important;
+            box-shadow: 0 4px 16px rgba(108, 62, 245, 0.45) !important;
+            z-index: 9999999 !important;
+            transition: all 0.15s ease !important;
+            cursor: pointer !important;
+            position: fixed !important;
+            top: 8px !important;
+            left: 8px !important;
+        }}
+
+        [data-testid="stSidebarCollapsedControl"]:hover,
+        [data-testid="stSidebarCollapseButton"]:hover,
+        [data-testid="collapsedControl"]:hover {{
+            background: #5a2ee0 !important;
+            transform: scale(1.05) !important;
+            box-shadow: 0 6px 20px rgba(108, 62, 245, 0.6) !important;
+        }}
+
+        [data-testid="stSidebarCollapsedControl"] svg,
+        [data-testid="stSidebarCollapseButton"] svg,
+        [data-testid="collapsedControl"] svg {{
+            fill: #ffffff !important;
+            color: #ffffff !important;
+            width: 22px !important;
+            height: 22px !important;
+        }}
+
+        /* Hide the button on desktop — sidebar stays open */
+        @media (min-width: 769px) {{
+            [data-testid="stSidebarCollapsedControl"],
+            [data-testid="stSidebarCollapseButton"],
+            [data-testid="collapsedControl"] {{
+                display: none !important;
+            }}
+        }}
 
         @media (max-width: 768px) {{
             [data-testid="stSidebar"] {{ min-width: 84vw !important; max-width: 84vw !important; }}
@@ -835,7 +874,6 @@ def render_chat():
     if msgs and msgs[-1]["role"] == "user":
         try:
             client = get_client()
-            # ✅ STRIP ts field before sending to Groq
             clean_msgs = [{"role": m["role"], "content": m["content"]} for m in msgs]
             full = [{"role":"system","content":SYS_PROMPT}] + clean_msgs
             hist = trim_history(full)
