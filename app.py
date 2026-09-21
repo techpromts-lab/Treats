@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 TOKEN_LIMIT = 5000
-TOKEN_WARN_AT = 0.8  # 80%
+TOKEN_WARN_AT = 0.8
 
 # ============================================================
 # LOGO
@@ -60,12 +60,12 @@ defaults = {
     "token_date": date.today().isoformat(),
     "dev_mode": False,
     "show_dev_input": False,
-    "density": "comfortable",   # or "compact"
-    "font_size": "medium",       # or "small", "large"
+    "density": "comfortable",
+    "font_size": "medium",
     "conv_search": "",
     "rename_conv": None,
-    "edit_msg": None,
     "warned_80": False,
+    "show_settings": False,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -93,7 +93,6 @@ def can_send():
 def add_tokens(n):
     if not is_unlimited():
         st.session_state.tokens_used += n
-        # Warn at 80%
         if (st.session_state.tokens_used >= TOKEN_LIMIT * TOKEN_WARN_AT
                 and not st.session_state.warned_80):
             st.session_state.warned_80 = True
@@ -112,12 +111,9 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
         bord="#ececec"; bsoft="#f3f4f6"; txt="#0d0d0d"; tsoft="#6b7280"; tmuted="#9ca3af"
         hov="#ffffff"; act="#ffffff"; bbtn="#ffffff"; bhv="#f9fafb"; bbd="#e5e7eb"; cib="#ffffff"
 
-    # Font sizes
     fs_base = {"small": "13px", "medium": "15px", "large": "17px"}[font_size]
     fs_h1 = {"small": "26px", "medium": "30px", "large": "34px"}[font_size]
     fs_tool = {"small": "22px", "medium": "26px", "large": "30px"}[font_size]
-
-    # Density
     msg_pad = "12px 0" if density == "compact" else "22px 0"
 
     st.markdown(f"""
@@ -440,7 +436,6 @@ def fmt_time(iso):
     except: return ""
 
 def copy_to_clipboard(text, key):
-    """Real clipboard copy via JS."""
     js_text = json.dumps(text)
     components.html(f"""
     <script>
@@ -592,12 +587,6 @@ def tool_header(k, title, sub):
         f'<div class="title-block"><h1>{title}</h1><p>{sub}</p></div></div>'
         f'<div style="height:24px"></div>', unsafe_allow_html=True)
 
-def empty_state(icon, title, desc):
-    st.markdown(
-        f'<div class="empty-state"><div class="icon">{icon}</div>'
-        f'<div class="title">{title}</div><div class="desc">{desc}</div></div>',
-        unsafe_allow_html=True)
-
 # ============================================================
 # SIDEBAR
 # ============================================================
@@ -613,7 +602,6 @@ with st.sidebar:
         f'<div class="treats-brand"><img src="{LOGO_URI}" alt="Treats">'
         f'<span class="name">Treats</span></div>', unsafe_allow_html=True)
 
-    # Theme + Settings row
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
         st.markdown('<div class="sidebar-label" style="padding-top:0;">Display</div>', unsafe_allow_html=True)
@@ -637,7 +625,6 @@ with st.sidebar:
         if fsize != st.session_state.font_size:
             st.session_state.font_size = fsize; st.rerun()
 
-    # Usage
     st.markdown('<div class="sidebar-label">Usage</div>', unsafe_allow_html=True)
     if is_unlimited():
         st.markdown(
@@ -659,22 +646,18 @@ with st.sidebar:
             f'<div class="token-bar-wrap"><div class="token-bar-fill" style="width:{pct}%;background:{bc};"></div></div></div>',
             unsafe_allow_html=True)
 
-    # Tools
     st.markdown('<div class="sidebar-label">Tools</div>', unsafe_allow_html=True)
     choice = st.radio("nav", list(TOOLS.keys()), label_visibility="collapsed", key="nav")
     tool = TOOLS[choice]
 
-    # Conversations (chat only)
     if tool == "chat":
         st.markdown('<div class="sidebar-label">Conversations</div>', unsafe_allow_html=True)
         if st.button("+ New chat", key="nc", use_container_width=True):
             new_conv(); st.rerun()
 
-        # Search
         search = st.text_input("search", placeholder="🔍 Search...",
                                 label_visibility="collapsed", key="conv_search")
 
-        # Filter
         items = list(st.session_state.conversations.items())
         if search:
             items = [(c, v) for c, v in items if search.lower() in v["title"].lower()]
@@ -688,12 +671,11 @@ with st.sidebar:
                     st.session_state.active_conversation = cid; st.rerun()
             with col2:
                 if st.button("✎", key=f"r_{cid}", help="Rename"):
-                    st.session_state.rename_conv = cid
+                    st.session_state.rename_conv = cid; st.rerun()
             with col3:
                 if st.button("×", key=f"d_{cid}", help="Delete"):
                     del_conv(cid); st.rerun()
 
-            # Rename inline
             if st.session_state.rename_conv == cid:
                 with st.form(f"ren_{cid}"):
                     new_title = st.text_input("New title", value=conv["title"],
@@ -708,7 +690,6 @@ with st.sidebar:
                         if st.form_submit_button("Cancel", use_container_width=True):
                             st.session_state.rename_conv = None; st.rerun()
 
-        # Export all
         if len(st.session_state.conversations) > 1:
             if st.button("📦 Export all (ZIP)", key="exp_all", use_container_width=True):
                 buf = io.BytesIO()
@@ -724,7 +705,6 @@ with st.sidebar:
     st.markdown('<div class="sidebar-label">AI Model</div>', unsafe_allow_html=True)
     model = st.selectbox("m", AVAILABLE_MODELS, key="mdl", label_visibility="collapsed")
 
-    # Developer
     dev_label = "🔓 Dev: ON" if st.session_state.dev_mode else "Developer"
     if st.button(dev_label, key="dev_btn", use_container_width=True):
         if st.session_state.dev_mode:
@@ -792,13 +772,11 @@ def render_chat():
                     if st.button(l, key=f"p_{i}", use_container_width=True):
                         st.session_state.pl_template = t; st.rerun()
 
-    # Render messages
     for i, m in enumerate(msgs):
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
 
             if m["role"] == "assistant":
-                # Meta row
                 ts = fmt_time(m.get("ts", ""))
                 tok = count_tokens(m["content"])
                 wc = count_words(m["content"])
@@ -808,7 +786,6 @@ def render_chat():
                     f'<span class="time-badge">{ts}</span>',
                     unsafe_allow_html=True)
 
-                # Actions
                 c1, c2, c3, _ = st.columns([1, 1, 1, 7])
                 with c1:
                     if st.button("📋 Copy", key=f"cp_{i}"):
@@ -823,7 +800,6 @@ def render_chat():
                         new_msgs = msgs[:i] + msgs[i+1:]
                         set_msgs(new_msgs); st.rerun()
 
-    # Bottom actions
     if msgs:
         c1, c2, c3 = st.columns([1, 1, 1])
         with c1:
@@ -861,21 +837,28 @@ def render_chat():
             client = get_client()
             full = [{"role":"system","content":SYS_PROMPT}] + msgs
             hist = trim_history(full)
+
+            # NOTE: stream_options removed for compatibility
             stream = client.chat.completions.create(
-                model=model, messages=hist, temperature=0.7,
-                stream=True, stream_options={"include_usage": True})
+                model=model,
+                messages=hist,
+                temperature=0.7,
+                stream=True,
+            )
+
             with st.chat_message("assistant"):
                 ph = st.empty()
-                full_txt = ""; total_t = 0
+                full_txt = ""
                 for ch in stream:
                     if ch.choices and ch.choices[0].delta.content:
                         full_txt += ch.choices[0].delta.content
                         ph.markdown(full_txt + "▌")
-                    if hasattr(ch, "usage") and ch.usage: total_t = ch.usage.total_tokens
                 ph.markdown(full_txt)
-            if total_t == 0:
-                total_t = sum(count_tokens(m["content"]) for m in hist) + count_tokens(full_txt)
+
+            # Estimate tokens
+            total_t = sum(count_tokens(m["content"]) for m in hist) + count_tokens(full_txt)
             add_tokens(total_t)
+
             msgs.append({"role":"assistant","content":full_txt,"ts": datetime.now().isoformat()})
             set_msgs(msgs)
             st.rerun()
