@@ -835,10 +835,11 @@ def render_chat():
     if msgs and msgs[-1]["role"] == "user":
         try:
             client = get_client()
-            full = [{"role":"system","content":SYS_PROMPT}] + msgs
+            # ✅ STRIP ts field before sending to Groq
+            clean_msgs = [{"role": m["role"], "content": m["content"]} for m in msgs]
+            full = [{"role":"system","content":SYS_PROMPT}] + clean_msgs
             hist = trim_history(full)
 
-            # NOTE: stream_options removed for compatibility
             stream = client.chat.completions.create(
                 model=model,
                 messages=hist,
@@ -855,7 +856,6 @@ def render_chat():
                         ph.markdown(full_txt + "▌")
                 ph.markdown(full_txt)
 
-            # Estimate tokens
             total_t = sum(count_tokens(m["content"]) for m in hist) + count_tokens(full_txt)
             add_tokens(total_t)
 
