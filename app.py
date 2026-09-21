@@ -21,7 +21,7 @@ st.set_page_config(
 # ============================================================
 # CONSTANTS
 # ============================================================
-TOKEN_LIMIT = 5000  # free users
+TOKEN_LIMIT = 5000
 
 # ============================================================
 # INLINE SVG LOGO
@@ -54,7 +54,7 @@ LOGO_URI = "data:image/svg+xml;base64," + base64.b64encode(LOGO_SVG.encode()).de
 
 
 # ============================================================
-# SESSION STATE INIT
+# SESSION STATE
 # ============================================================
 if "dark_mode" not in st.session_state:
     st.session_state.dark_mode = False
@@ -71,7 +71,7 @@ if "show_dev_input" not in st.session_state:
 # ============================================================
 def tokens_remaining():
     if st.session_state.dev_mode:
-        return None  # unlimited
+        return None
     return max(0, TOKEN_LIMIT - st.session_state.tokens_used)
 
 
@@ -90,27 +90,49 @@ def add_tokens(n):
 # ============================================================
 def load_css(dark=False):
     if dark:
-        bg = "#0d0d0d"; sidebar_bg_1 = "#161616"; sidebar_bg_2 = "#1a1a1a"
-        surface = "#1a1a1a"; surface_2 = "#232323"
-        border = "#2a2a2a"; border_soft = "#232323"
-        text = "#ececec"; text_soft = "#a0a0a0"; text_muted = "#6b6b6b"
-        hover = "#232323"; active = "#2d2d2d"
-        btn_bg = "#1a1a1a"; btn_hover = "#232323"; btn_border = "#2a2a2a"
+        bg = "#0d0d0d"
+        sidebar_bg_1 = "#161616"
+        sidebar_bg_2 = "#1a1a1a"
+        surface = "#1a1a1a"
+        surface_2 = "#232323"
+        border = "#2a2a2a"
+        border_soft = "#232323"
+        text = "#ececec"
+        text_soft = "#a0a0a0"
+        text_muted = "#6b6b6b"
+        hover = "#232323"
+        active = "#2d2d2d"
+        btn_bg = "#1a1a1a"
+        btn_hover = "#232323"
+        btn_border = "#2a2a2a"
         chat_input_bg = "#1a1a1a"
     else:
-        bg = "#ffffff"; sidebar_bg_1 = "#faf9ff"; sidebar_bg_2 = "#f5f3ff"
-        surface = "#ffffff"; surface_2 = "#f7f7f8"
-        border = "#ececec"; border_soft = "#f3f4f6"
-        text = "#0d0d0d"; text_soft = "#6b7280"; text_muted = "#9ca3af"
-        hover = "#ffffff"; active = "#ffffff"
-        btn_bg = "#ffffff"; btn_hover = "#f9fafb"; btn_border = "#e5e7eb"
+        bg = "#ffffff"
+        sidebar_bg_1 = "#faf9ff"
+        sidebar_bg_2 = "#f5f3ff"
+        surface = "#ffffff"
+        surface_2 = "#f7f7f8"
+        border = "#ececec"
+        border_soft = "#f3f4f6"
+        text = "#0d0d0d"
+        text_soft = "#6b7280"
+        text_muted = "#9ca3af"
+        hover = "#ffffff"
+        active = "#ffffff"
+        btn_bg = "#ffffff"
+        btn_hover = "#f9fafb"
+        btn_border = "#e5e7eb"
         chat_input_bg = "#ffffff"
 
     st.markdown(f"""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-        html, body, [class*="css"] {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }}
 
+        html, body, [class*="css"] {{
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }}
+
+        /* ---------- HIDE CHROME ---------- */
         #MainMenu {{ visibility: hidden !important; }}
         footer {{ visibility: hidden !important; }}
         [data-testid="stDecoration"] {{ display: none !important; }}
@@ -118,77 +140,171 @@ def load_css(dark=False):
         [data-testid="stAppDeployButton"] {{ display: none !important; }}
         [data-testid="stMainMenu"] {{ display: none !important; }}
         [data-testid="stToolbarActions"] {{ display: none !important; }}
-        header[data-testid="stHeader"] {{ background: transparent !important; box-shadow: none !important; }}
 
-        .stApp {{ background: {bg} !important; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }}
+        header[data-testid="stHeader"] {{
+            background: transparent !important;
+            box-shadow: none !important;
+        }}
 
+        /* ---------- GLOBAL BACKGROUND (dark mode fix) ---------- */
+        html, body,
+        .stApp,
+        [data-testid="stAppViewContainer"],
+        [data-testid="stAppViewContainer"] > .main,
+        section.main,
+        [data-testid="stMain"],
+        [data-testid="stVerticalBlock"],
+        [data-testid="stVerticalBlockBorderWrapper"] {{
+            background: {bg} !important;
+            color: {text} !important;
+        }}
+
+        .stApp {{
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior-y: contain;
+        }}
+
+        /* ---------- SIDEBAR TOGGLE ---------- */
         @media (min-width: 769px) {{
             [data-testid="stSidebarCollapseButton"],
             [data-testid="stSidebarCollapsedControl"],
             [data-testid="collapsedControl"] {{
-                display: none !important; visibility: hidden !important; pointer-events: none !important;
+                display: none !important;
+                visibility: hidden !important;
+                pointer-events: none !important;
             }}
         }}
         @media (max-width: 768px) {{
             [data-testid="stSidebarCollapseButton"],
             [data-testid="stSidebarCollapsedControl"],
             [data-testid="collapsedControl"] {{
-                display: flex !important; visibility: visible !important; opacity: 1 !important;
-                color: #6c3ef5 !important; z-index: 999999 !important;
+                display: flex !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+                color: #6c3ef5 !important;
+                z-index: 999999 !important;
             }}
             [data-testid="stSidebarCollapseButton"] svg,
             [data-testid="stSidebarCollapsedControl"] svg,
-            [data-testid="collapsedControl"] svg {{ color: #6c3ef5 !important; fill: #6c3ef5 !important; }}
+            [data-testid="collapsedControl"] svg {{
+                color: #6c3ef5 !important;
+                fill: #6c3ef5 !important;
+            }}
         }}
 
+        /* ---------- TOUCH FIX ---------- */
         * {{ -webkit-tap-highlight-color: transparent; }}
+
         button, .stButton, .stDownloadButton, label,
         h1, h2, h3, h4, h5, h6,
-        .tool-header, .treats-brand, .sidebar-footer, .treats-hero, [data-testid="stSidebar"] {{
-            -webkit-user-select: none; -moz-user-select: none; user-select: none; -webkit-touch-callout: none;
+        .tool-header, .treats-brand, .sidebar-footer, .treats-hero,
+        [data-testid="stSidebar"] {{
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
         }}
-        [data-testid="stChatMessage"], [data-testid="stChatMessage"] *,
-        .stMarkdown, .stMarkdown *, .stTextArea textarea, .stTextInput input,
-        pre, code, pre *, code * {{ -webkit-user-select: text; user-select: text; }}
-        [data-testid="stChatInput"] textarea {{ touch-action: manipulation; }}
-        html, body, .stApp {{ overflow-x: hidden; max-width: 100vw; }}
 
+        [data-testid="stChatMessage"],
+        [data-testid="stChatMessage"] *,
+        .stMarkdown, .stMarkdown *,
+        .stTextArea textarea, .stTextInput input,
+        pre, code, pre *, code * {{
+            -webkit-user-select: text;
+            user-select: text;
+        }}
+
+        [data-testid="stChatInput"] textarea {{
+            touch-action: manipulation;
+        }}
+
+        html, body, .stApp {{
+            overflow-x: hidden;
+            max-width: 100vw;
+        }}
+
+        /* ---------- SIDEBAR ---------- */
         [data-testid="stSidebar"] {{
             background: linear-gradient(180deg, {sidebar_bg_1} 0%, {sidebar_bg_2} 100%) !important;
             border-right: 1px solid {border} !important;
-            min-width: 280px !important; max-width: 280px !important;
+            min-width: 280px !important;
+            max-width: 280px !important;
         }}
-        [data-testid="stSidebar"] > div:first-child {{ padding: 1.5rem 0.9rem 1rem 0.9rem; }}
+        [data-testid="stSidebar"] > div:first-child {{
+            padding: 1.5rem 0.9rem 1rem 0.9rem;
+        }}
 
-        .treats-brand {{ padding: 4px 10px 22px 10px; display: flex; align-items: center; gap: 12px; }}
-        .treats-brand img {{ width: 44px; height: 44px; filter: drop-shadow(0 4px 12px rgba(108, 62, 245, 0.25)); }}
+        .treats-brand {{
+            padding: 4px 10px 22px 10px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }}
+        .treats-brand img {{
+            width: 44px;
+            height: 44px;
+            filter: drop-shadow(0 4px 12px rgba(108, 62, 245, 0.25));
+        }}
         .treats-brand .name {{
-            font-size: 20px; font-weight: 800; letter-spacing: -0.03em;
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: -0.03em;
             background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }}
 
         .sidebar-label {{
-            font-size: 11px; font-weight: 700; text-transform: uppercase;
-            letter-spacing: 0.08em; color: {text_muted};
-            padding: 8px 14px 6px 14px; margin-top: 8px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: {text_muted};
+            padding: 8px 14px 6px 14px;
+            margin-top: 8px;
         }}
 
-        [data-testid="stSidebar"] [data-testid="stRadio"] > div[role="radiogroup"] {{ gap: 3px !important; display: flex; flex-direction: column; }}
+        [data-testid="stSidebar"] [data-testid="stRadio"] > div[role="radiogroup"] {{
+            gap: 3px !important;
+            display: flex;
+            flex-direction: column;
+        }}
 
         [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {{
-            display: flex !important; align-items: center !important; gap: 12px !important;
-            padding: 10px 14px !important; margin: 0 !important; border-radius: 10px !important;
-            cursor: pointer !important; transition: all 0.15s ease !important;
-            font-size: 14px !important; font-weight: 500 !important; color: {text} !important;
-            width: 100% !important; background: transparent !important; border: 1px solid transparent !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 12px !important;
+            padding: 10px 14px !important;
+            margin: 0 !important;
+            border-radius: 10px !important;
+            cursor: pointer !important;
+            transition: all 0.15s ease !important;
+            font-size: 14px !important;
+            font-weight: 500 !important;
+            color: {text} !important;
+            width: 100% !important;
+            background: transparent !important;
+            border: 1px solid transparent !important;
         }}
-        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:hover {{ background: {hover} !important; border-color: {border} !important; }}
-        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {{ display: none !important; }}
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:hover {{
+            background: {hover} !important;
+            border-color: {border} !important;
+        }}
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {{
+            display: none !important;
+        }}
         [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]::before {{
-            content: '' !important; width: 20px !important; height: 20px !important; flex-shrink: 0 !important;
-            background-repeat: no-repeat !important; background-position: center !important;
-            background-size: 20px 20px !important; border-radius: 6px; padding: 4px; box-sizing: content-box;
+            content: '' !important;
+            width: 20px !important;
+            height: 20px !important;
+            flex-shrink: 0 !important;
+            background-repeat: no-repeat !important;
+            background-position: center !important;
+            background-size: 20px 20px !important;
+            border-radius: 6px;
+            padding: 4px;
+            box-sizing: content-box;
         }}
 
         label[data-baseweb="radio"]:nth-of-type(1)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2.2'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>") !important; background-color: #eef2ff; }}
@@ -199,28 +315,41 @@ def load_css(dark=False):
         label[data-baseweb="radio"]:nth-of-type(6)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b5cf6' stroke-width='2.2'><rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='8.5' cy='8.5' r='1.5'/><polyline points='21 15 16 10 5 21'/></svg>") !important; background-color: #ede9fe; }}
 
         label[data-baseweb="radio"]:has(input:checked) {{
-            background: {active} !important; border-color: {border} !important;
-            font-weight: 700 !important; color: {text} !important;
+            background: {active} !important;
+            border-color: {border} !important;
+            font-weight: 700 !important;
+            color: {text} !important;
         }}
 
         [data-testid="stSidebar"] [data-testid="stRadio"] > label:first-child {{ display: none !important; }}
 
         [data-testid="stSidebar"] [data-testid="stSelectbox"] > label {{
-            font-size: 11px !important; font-weight: 700 !important; text-transform: uppercase !important;
-            letter-spacing: 0.08em !important; color: {text_muted} !important; padding-left: 2px !important;
+            font-size: 11px !important;
+            font-weight: 700 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.08em !important;
+            color: {text_muted} !important;
+            padding-left: 2px !important;
         }}
         [data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div {{
-            background: {surface} !important; border: 1px solid {border} !important;
-            border-radius: 10px !important; font-size: 13px !important; color: {text} !important;
+            background: {surface} !important;
+            border: 1px solid {border} !important;
+            border-radius: 10px !important;
+            font-size: 13px !important;
+            color: {text} !important;
         }}
 
         .sidebar-footer {{
-            padding: 16px 14px; color: {text_soft}; font-size: 12px; line-height: 1.6;
-            border-top: 1px solid {border}; margin-top: 20px;
+            padding: 16px 14px;
+            color: {text_soft};
+            font-size: 12px;
+            line-height: 1.6;
+            border-top: 1px solid {border};
+            margin-top: 20px;
         }}
         .sidebar-footer strong {{ color: #6c3ef5; font-weight: 600; }}
 
-        /* Token usage panel */
+        /* Token panel */
         .token-panel {{
             background: {surface_2};
             border: 1px solid {border};
@@ -236,7 +365,6 @@ def load_css(dark=False):
         .token-panel .warn {{ color: #f59e0b; font-weight: 700; }}
         .token-panel .danger {{ color: #ef4444; font-weight: 700; }}
 
-        /* Progress bar */
         .token-bar-wrap {{
             height: 6px;
             background: {border};
@@ -250,42 +378,97 @@ def load_css(dark=False):
             transition: width 0.3s ease;
         }}
 
+        /* ---------- MAIN CENTERED ---------- */
         section.main, [data-testid="stMain"] {{
-            display: flex !important; flex-direction: column !important;
-            align-items: center !important; width: 100% !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            width: 100% !important;
         }}
 
         section.main > div.block-container,
         [data-testid="stMain"] > div.block-container,
         .main .block-container {{
-            width: 100% !important; max-width: 780px !important;
-            margin-left: auto !important; margin-right: auto !important;
+            width: 100% !important;
+            max-width: 780px !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
             padding: 1.5rem 1.5rem 5rem 1.5rem !important;
         }}
 
-        [data-testid="stChatInput"], [data-testid="stChatInputContainer"],
+        /* ---------- CHAT INPUT ---------- */
+        [data-testid="stChatInput"],
+        [data-testid="stChatInputContainer"],
         [data-testid="stBottomBlockContainer"] {{
-            max-width: 780px !important; margin-left: auto !important; margin-right: auto !important;
-            width: 100% !important; left: 0 !important; right: 0 !important; transform: none !important;
+            max-width: 780px !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            width: 100% !important;
+            left: 0 !important; right: 0 !important;
+            transform: none !important;
         }}
-        [data-testid="stBottom"] {{
-            width: 100% !important; left: 0 !important; right: 0 !important;
-            display: flex !important; justify-content: center !important; background: {bg} !important;
-        }}
-        [data-testid="stBottom"] > div {{ width: 100% !important; max-width: 780px !important; margin: 0 auto !important; }}
 
+        /* ---------- BOTTOM AREA (full dark mode coverage) ---------- */
+        [data-testid="stBottom"],
+        [data-testid="stBottom"] > div,
+        [data-testid="stBottom"] > div > div,
+        [data-testid="stBottomBlockContainer"],
+        [data-testid="stBottomBlockContainer"] > div,
+        [data-testid="stBottomBlockContainer"] > div > div {{
+            background: {bg} !important;
+            color: {text} !important;
+        }}
+
+        [data-testid="stBottom"] {{
+            width: 100% !important;
+            left: 0 !important; right: 0 !important;
+            display: flex !important;
+            justify-content: center !important;
+        }}
+        [data-testid="stBottom"] > div {{
+            width: 100% !important;
+            max-width: 780px !important;
+            margin: 0 auto !important;
+        }}
+
+        /* Chat input styling */
+        [data-testid="stChatInput"] {{
+            border-radius: 14px !important;
+            border: 1px solid {btn_border} !important;
+            background: {chat_input_bg} !important;
+            box-shadow: 0 4px 16px rgba(108, 62, 245, 0.06) !important;
+        }}
+        [data-testid="stChatInput"]:focus-within {{
+            border-color: #a855f7 !important;
+            box-shadow: 0 4px 20px rgba(168, 85, 247, 0.15) !important;
+        }}
+        [data-testid="stChatInput"] textarea {{
+            background: transparent !important;
+            color: {text} !important;
+        }}
+        [data-testid="stChatInput"] textarea::placeholder {{
+            color: {text_soft} !important;
+        }}
+
+        /* ---------- TYPOGRAPHY ---------- */
         h1, h2, h3, h4, h5, h6 {{ color: {text} !important; }}
         h1 {{ font-size: 30px !important; font-weight: 800 !important; letter-spacing: -0.03em !important; margin-bottom: 0.4rem !important; }}
         h2 {{ font-size: 22px !important; font-weight: 700 !important; }}
         p, li, label, .stMarkdown {{ font-size: 15px; line-height: 1.65; color: {text} !important; }}
 
         .tool-header {{
-            display: flex; align-items: center; gap: 14px; margin-bottom: 6px;
-            padding-bottom: 16px; border-bottom: 1px solid {border_soft};
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 6px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid {border_soft};
         }}
         .tool-header .icon {{
-            width: 44px; height: 44px; border-radius: 12px;
-            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+            width: 44px; height: 44px;
+            border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
         }}
         .tool-header .icon svg {{ width: 22px; height: 22px; }}
         .tool-header .title-block h1 {{ margin: 0 !important; font-size: 26px !important; }}
@@ -298,73 +481,116 @@ def load_css(dark=False):
         .theme-tts .icon {{ background: linear-gradient(135deg, #fce7f3, #fbcfe8); }}
         .theme-photo .icon {{ background: linear-gradient(135deg, #ede9fe, #ddd6fe); }}
 
+        /* ---------- BUTTONS ---------- */
         .stButton > button {{
-            background: {btn_bg}; color: {text}; border: 1px solid {btn_border};
-            border-radius: 10px; padding: 8px 18px; font-weight: 600; font-size: 14px;
-            transition: all 0.15s ease; box-shadow: none;
+            background: {btn_bg};
+            color: {text};
+            border: 1px solid {btn_border};
+            border-radius: 10px;
+            padding: 8px 18px;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.15s ease;
+            box-shadow: none;
         }}
         .stButton > button:hover {{
-            background: {btn_hover}; border-color: #a855f7;
-            color: #6c3ef5; transform: translateY(-1px);
+            background: {btn_hover};
+            border-color: #a855f7;
+            color: #6c3ef5;
+            transform: translateY(-1px);
         }}
         .stButton > button[kind="primary"] {{
             background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%);
-            color: #ffffff; border: none; box-shadow: 0 4px 14px rgba(108, 62, 245, 0.3);
+            color: #ffffff;
+            border: none;
+            box-shadow: 0 4px 14px rgba(108, 62, 245, 0.3);
         }}
         .stButton > button[kind="primary"]:hover {{
             background: linear-gradient(135deg, #5a2ee0 0%, #9333ea 100%);
-            box-shadow: 0 6px 20px rgba(108, 62, 245, 0.4); color: #ffffff;
+            box-shadow: 0 6px 20px rgba(108, 62, 245, 0.4);
+            color: #ffffff;
         }}
         .stDownloadButton > button {{
-            background: {btn_bg}; color: {text}; border: 1px solid {btn_border};
-            border-radius: 10px; padding: 8px 18px; font-weight: 600; font-size: 14px;
+            background: {btn_bg};
+            color: {text};
+            border: 1px solid {btn_border};
+            border-radius: 10px;
+            padding: 8px 18px;
+            font-weight: 600;
+            font-size: 14px;
         }}
-        .stDownloadButton > button:hover {{ background: {btn_hover}; border-color: #a855f7; color: #6c3ef5; }}
+        .stDownloadButton > button:hover {{
+            background: {btn_hover};
+            border-color: #a855f7;
+            color: #6c3ef5;
+        }}
 
-        .stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox > div > div {{
-            border-radius: 10px !important; border-color: {btn_border} !important;
-            font-size: 14px !important; background: {surface} !important; color: {text} !important;
+        /* ---------- INPUTS ---------- */
+        .stTextInput input,
+        .stTextArea textarea,
+        .stNumberInput input,
+        .stSelectbox > div > div {{
+            border-radius: 10px !important;
+            border-color: {btn_border} !important;
+            font-size: 14px !important;
+            background: {surface} !important;
+            color: {text} !important;
         }}
-        .stTextInput input:focus, .stTextArea textarea:focus, .stNumberInput input:focus {{
-            border-color: #a855f7 !important; box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.12) !important;
+        .stTextInput input:focus,
+        .stTextArea textarea:focus,
+        .stNumberInput input:focus {{
+            border-color: #a855f7 !important;
+            box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.12) !important;
         }}
         .stTextArea textarea {{ padding: 12px 14px !important; line-height: 1.6 !important; }}
 
+        /* ---------- FORM ---------- */
         [data-testid="stForm"] {{
-            border: 1px solid {border_soft}; border-radius: 16px;
-            padding: 22px 24px; background: {surface}; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+            border: 1px solid {border_soft};
+            border-radius: 16px;
+            padding: 22px 24px;
+            background: {surface};
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
         }}
 
+        /* ---------- CHAT MESSAGES ---------- */
         [data-testid="stChatMessage"] {{
-            background: transparent !important; padding: 20px 0;
-            border-bottom: 1px solid {border_soft}; border-radius: 0;
+            background: transparent !important;
+            padding: 20px 0;
+            border-bottom: 1px solid {border_soft};
+            border-radius: 0;
         }}
         [data-testid="stChatMessage"]:last-child {{ border-bottom: none; }}
 
-        [data-testid="stChatInput"] {{
-            border-radius: 14px; border: 1px solid {btn_border};
-            background: {chat_input_bg}; box-shadow: 0 4px 16px rgba(108, 62, 245, 0.06);
-        }}
-        [data-testid="stChatInput"]:focus-within {{
-            border-color: #a855f7; box-shadow: 0 4px 20px rgba(168, 85, 247, 0.15);
-        }}
-
+        /* ---------- CODE ---------- */
         code {{
-            background: {surface_2} !important; color: #a855f7 !important;
-            padding: 3px 8px !important; border-radius: 6px !important;
-            font-size: 13px !important; font-weight: 600;
+            background: {surface_2} !important;
+            color: #a855f7 !important;
+            padding: 3px 8px !important;
+            border-radius: 6px !important;
+            font-size: 13px !important;
+            font-weight: 600;
         }}
         pre {{ background: #1e1b4b !important; border-radius: 14px !important; }}
         hr {{ border-color: {border_soft}; margin: 1.5rem 0; }}
-        .stCaption, [data-testid="stCaptionContainer"] {{ color: {text_soft}; font-size: 13px; }}
+        .stCaption, [data-testid="stCaptionContainer"] {{
+            color: {text_soft};
+            font-size: 13px;
+        }}
 
+        /* ---------- HERO ---------- */
         .treats-hero {{
-            display: flex !important; flex-direction: column !important;
-            align-items: center !important; justify-content: center !important;
-            min-height: 52vh !important; padding: 20px 16px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-height: 52vh !important;
+            padding: 20px 16px !important;
         }}
         .treats-hero .hero-logo {{
-            width: 160px !important; height: 160px !important; margin: 0 auto !important;
+            width: 160px !important;
+            height: 160px !important;
+            margin: 0 auto !important;
             filter: drop-shadow(0 14px 36px rgba(108, 62, 245, 0.22)) !important;
             animation: float 3s ease-in-out infinite;
         }}
@@ -373,28 +599,42 @@ def load_css(dark=False):
             50% {{ transform: translateY(-6px); }}
         }}
 
+        /* ---------- EXPANDER ---------- */
         details {{
-            border: 1px solid {border_soft}; border-radius: 12px;
-            padding: 4px 14px; background: {surface_2};
+            border: 1px solid {border_soft};
+            border-radius: 12px;
+            padding: 4px 14px;
+            background: {surface_2};
+            color: {text} !important;
         }}
-        details summary {{ font-weight: 600; font-size: 14px; color: {text}; }}
+        details summary {{ font-weight: 600; font-size: 14px; color: {text} !important; }}
 
+        /* ---------- TOKEN BADGE ---------- */
         .token-badge {{
-            display: inline-block; padding: 3px 9px; border-radius: 6px;
-            font-size: 11px; font-weight: 600; background: {surface_2};
-            color: {text_soft}; margin-top: 8px;
+            display: inline-block;
+            padding: 3px 9px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            background: {surface_2};
+            color: {text_soft};
+            margin-top: 8px;
         }}
 
+        /* ---------- RESPONSIVE ---------- */
         @media (min-width: 769px) and (max-width: 1100px) {{
-            section.main > div.block-container, .main .block-container {{ max-width: 680px !important; }}
+            section.main > div.block-container,
+            .main .block-container {{ max-width: 680px !important; }}
             [data-testid="stChatInput"], [data-testid="stBottom"] > div {{ max-width: 680px !important; }}
             .treats-hero .hero-logo {{ width: 140px !important; height: 140px !important; }}
         }}
 
         @media (max-width: 768px) {{
             [data-testid="stSidebar"] {{ min-width: 82vw !important; max-width: 82vw !important; }}
-            section.main > div.block-container, .main .block-container {{
-                padding: 0.75rem 0.75rem 3rem 0.75rem !important; max-width: 100% !important;
+            section.main > div.block-container,
+            .main .block-container {{
+                padding: 0.75rem 0.75rem 3rem 0.75rem !important;
+                max-width: 100% !important;
             }}
             h1 {{ font-size: 22px !important; }}
             .tool-header .icon {{ width: 38px; height: 38px; }}
@@ -475,8 +715,10 @@ def init_conversations():
     if "conversations" not in st.session_state:
         st.session_state.conversations = {
             "default": {
-                "id": "default", "title": "New chat",
-                "messages": [], "created": datetime.now().isoformat(),
+                "id": "default",
+                "title": "New chat",
+                "messages": [],
+                "created": datetime.now().isoformat(),
             }
         }
         st.session_state.active_conversation = "default"
@@ -495,8 +737,10 @@ def new_conversation():
     init_conversations()
     new_id = f"conv_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
     st.session_state.conversations[new_id] = {
-        "id": new_id, "title": "New chat",
-        "messages": [], "created": datetime.now().isoformat(),
+        "id": new_id,
+        "title": "New chat",
+        "messages": [],
+        "created": datetime.now().isoformat(),
     }
     st.session_state.active_conversation = new_id
 
@@ -517,10 +761,12 @@ def auto_title(message):
         resp = client.chat.completions.create(
             model="openai/gpt-oss-20b",
             messages=[{"role": "user", "content": TITLE_PROMPT.format(message=message[:300])}],
-            temperature=0.3, max_tokens=20,
+            temperature=0.3,
+            max_tokens=20,
         )
         title = resp.choices[0].message.content.strip().strip('"').strip("'")
-        add_tokens(resp.usage.total_tokens if resp.usage else 20)
+        if resp.usage:
+            add_tokens(resp.usage.total_tokens)
         return title[:40] if title else "New chat"
     except Exception:
         return message[:30] + ("..." if len(message) > 30 else "")
@@ -659,7 +905,7 @@ with st.sidebar:
             st.session_state.dark_mode = not st.session_state.dark_mode
             st.rerun()
 
-    # TOKEN USAGE PANEL
+    # Token usage
     st.markdown('<div class="sidebar-label">Usage</div>', unsafe_allow_html=True)
 
     if st.session_state.dev_mode:
@@ -702,8 +948,10 @@ with st.sidebar:
     # Tools
     st.markdown('<div class="sidebar-label">Tools</div>', unsafe_allow_html=True)
     choice_label = st.radio(
-        "Navigation", list(TOOLS.keys()),
-        label_visibility="collapsed", key="nav",
+        "Navigation",
+        list(TOOLS.keys()),
+        label_visibility="collapsed",
+        key="nav",
     )
     tool = TOOLS[choice_label]
 
@@ -730,11 +978,13 @@ with st.sidebar:
     # Model
     st.markdown('<div class="sidebar-label">AI Model</div>', unsafe_allow_html=True)
     model = st.selectbox(
-        "AI Model", AVAILABLE_MODELS,
-        key="model", label_visibility="collapsed",
+        "AI Model",
+        AVAILABLE_MODELS,
+        key="model",
+        label_visibility="collapsed",
     )
 
-    # ---- DEVELOPER BUTTON ----
+    # Developer button
     st.markdown("<div style='height: 20px'></div>", unsafe_allow_html=True)
     dev_label = "🔓 Developer Mode: ON" if st.session_state.dev_mode else "Developer"
     if st.button(dev_label, key="dev_btn", use_container_width=True):
@@ -786,7 +1036,6 @@ PROMPT_LIBRARY = [
 def render_chat():
     messages = get_active_messages()
 
-    # Check limit
     if not can_send():
         st.markdown(
             '<div style="background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; '
@@ -905,7 +1154,6 @@ def render_chat():
                 placeholder.markdown(full)
 
             if total_tokens == 0:
-                # Fallback estimate
                 total_tokens = sum(count_tokens(m["content"]) for m in history) + count_tokens(full)
             add_tokens(total_tokens)
 
@@ -970,7 +1218,6 @@ Format in clean Markdown with clear headings."""
                     model="openai/gpt-oss-120b",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.6,
-                    stream_options={"include_usage": True},
                 )
             cv_text = resp.choices[0].message.content
             if resp.usage:
@@ -989,7 +1236,7 @@ Format in clean Markdown with clear headings."""
 
 
 # ============================================================
-# TOOL: PASSWORD GENERATOR (no tokens used)
+# TOOL: PASSWORD GENERATOR
 # ============================================================
 def render_password():
     import string
@@ -1004,8 +1251,10 @@ def render_password():
         use_symbols = st.checkbox("Include symbols", value=True)
 
     chars = string.ascii_letters
-    if use_numbers: chars += string.digits
-    if use_symbols: chars += "!@#$%^&*()-_=+"
+    if use_numbers:
+        chars += string.digits
+    if use_symbols:
+        chars += "!@#$%^&*()-_=+"
 
     if st.button("Generate Password", type="primary", use_container_width=True):
         pwd = "".join(random.choice(chars) for _ in range(length))
@@ -1064,7 +1313,7 @@ Break into scenes with a storyboard."""
 
 
 # ============================================================
-# TOOL: TEXT TO SPEECH (no tokens used)
+# TOOL: TEXT TO SPEECH
 # ============================================================
 LANG_LABELS = {"en": "English", "ar": "Arabic", "fr": "French", "es": "Spanish", "de": "German"}
 
@@ -1080,7 +1329,8 @@ def render_tts():
         return
 
     lang_choice = st.radio(
-        "Language", avail,
+        "Language",
+        avail,
         format_func=lambda x: LANG_LABELS.get(x, x),
         horizontal=True,
     )
@@ -1115,7 +1365,7 @@ def render_tts():
 
 
 # ============================================================
-# TOOL: IMAGE GENERATOR (no tokens used)
+# TOOL: IMAGE GENERATOR
 # ============================================================
 def render_photo():
     render_tool_header("photo", "Image Generator", "Create images from text descriptions")
