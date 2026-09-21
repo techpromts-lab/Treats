@@ -131,18 +131,6 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
             background: {bg} !important; color: {txt} !important;
         }}
 
-        @media (min-width: 769px) {{
-            [data-testid="stSidebarCollapseButton"], [data-testid="stSidebarCollapsedControl"],
-            [data-testid="collapsedControl"] {{ display: none !important; }}
-        }}
-        @media (max-width: 768px) {{
-            [data-testid="stSidebarCollapseButton"], [data-testid="stSidebarCollapsedControl"],
-            [data-testid="collapsedControl"] {{
-                display: flex !important; color: #6c3ef5 !important; z-index: 999999 !important;
-            }}
-            [data-testid="collapsedControl"] svg {{ fill: #6c3ef5 !important; }}
-        }}
-
         * {{ -webkit-tap-highlight-color: transparent; }}
         button, .stButton, .stDownloadButton, label, h1,h2,h3,h4,h5,h6,
         .tool-header, .treats-brand, .sidebar-footer, .treats-hero, [data-testid="stSidebar"] {{
@@ -386,6 +374,74 @@ load_css(
     density=st.session_state.density,
     font_size=st.session_state.font_size,
 )
+
+# ============================================================
+# INJECT JS — Force style on sidebar toggle button
+# ============================================================
+components.html("""
+<script>
+(function() {
+    const doc = window.parent.document;
+
+    function styleToggle() {
+        const selectors = [
+            '[data-testid="stSidebarCollapsedControl"]',
+            '[data-testid="stSidebarCollapseButton"]',
+            '[data-testid="collapsedControl"]',
+            'button[kind="headerNoPadding"]',
+            'button[kind="header"]'
+        ];
+
+        const STYLE = 'background:#6c3ef5 !important;' +
+                      'background-color:#6c3ef5 !important;' +
+                      'background-image:none !important;' +
+                      'color:#ffffff !important;' +
+                      'border:none !important;' +
+                      'border-radius:12px !important;' +
+                      'padding:10px !important;' +
+                      'margin:12px !important;' +
+                      'box-shadow:0 4px 16px rgba(108,62,245,0.5) !important;' +
+                      'z-index:2147483647 !important;' +
+                      'position:fixed !important;' +
+                      'top:8px !important;' +
+                      'left:8px !important;' +
+                      'width:44px !important;' +
+                      'height:44px !important;' +
+                      'display:flex !important;' +
+                      'align-items:center !important;' +
+                      'justify-content:center !important;' +
+                      'cursor:pointer !important;' +
+                      'opacity:1 !important;' +
+                      'visibility:visible !important;';
+
+        selectors.forEach(function(sel) {
+            doc.querySelectorAll(sel).forEach(function(el) {
+                el.style.cssText = STYLE;
+                const btn = el.querySelector('button') || el;
+                if (btn && btn !== el) btn.style.cssText = STYLE;
+                el.querySelectorAll('svg').forEach(function(svg) {
+                    svg.style.fill = '#ffffff';
+                    svg.style.color = '#ffffff';
+                    svg.style.stroke = '#ffffff';
+                    svg.style.width = '22px';
+                    svg.style.height = '22px';
+                });
+                el.querySelectorAll('span').forEach(function(sp) {
+                    sp.style.color = '#ffffff';
+                });
+            });
+        });
+    }
+
+    styleToggle();
+    setInterval(styleToggle, 400);
+    try {
+        const observer = new MutationObserver(styleToggle);
+        observer.observe(doc.body, { childList: true, subtree: true });
+    } catch(e) {}
+})();
+</script>
+""", height=0)
 
 # ============================================================
 # ERROR + GROQ
@@ -835,7 +891,6 @@ def render_chat():
     if msgs and msgs[-1]["role"] == "user":
         try:
             client = get_client()
-            # ✅ STRIP ts field before sending to Groq
             clean_msgs = [{"role": m["role"], "content": m["content"]} for m in msgs]
             full = [{"role":"system","content":SYS_PROMPT}] + clean_msgs
             hist = trim_history(full)
