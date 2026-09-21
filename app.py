@@ -6,7 +6,6 @@ import asyncio
 import io
 import base64
 import zipfile
-import re
 import streamlit.components.v1 as components
 from urllib.parse import quote
 from datetime import datetime, date
@@ -20,13 +19,10 @@ st.set_page_config(page_title="Treats", page_icon="🧠", layout="wide",
 TOKEN_LIMIT = 5000
 TOKEN_WARN_AT = 0.8
 
-# Token cost per tool
 TOOL_COSTS = {
-    "tts": 100,        # TTS cost
-    "image": 150,      # Image generation
-    "password": 10,    # Password gen
-    "cv": 0,           # dynamic (real Groq usage)
-    "video": 0,        # dynamic
+    "tts": 100,
+    "image": 150,
+    "password": 10,
 }
 
 # ============================================================
@@ -87,10 +83,9 @@ def add_tokens(n):
             st.toast(f"⚠️ You've used {int(TOKEN_WARN_AT*100)}% of your daily tokens")
 
 def deduct_tool(cost, tool_name):
-    """Deduct token cost for a tool usage."""
     if not is_unlimited():
         st.session_state.tokens_used += cost
-        st.toast(f"💎 {tool_name}: -{cost} tokens", icon="💎")
+        st.toast(f"💎 {tool_name}: -{cost} tokens")
 
 # ============================================================
 # CSS
@@ -99,18 +94,16 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
     if dark:
         bg="#0d0d0d"; sbg1="#161616"; sbg2="#1a1a1a"; surf="#1a1a1a"; surf2="#232323"
         bord="#2a2a2a"; bsoft="#232323"; txt="#ececec"; tsoft="#a0a0a0"; tmuted="#6b6b6b"
-        hov="#232323"; act="#2d2d2d"; bbtn="#1a1a1a"; bhv="#232323"; bbd="#2a2a2a"; cib="#1a1a1a"
+        hov="#232323"; act="#2d2d2d"; bbtn="#1a1a1a"; bhv="#232323"; bbd="#2a2a2a"
     else:
         bg="#ffffff"; sbg1="#faf9ff"; sbg2="#f5f3ff"; surf="#ffffff"; surf2="#f7f7f8"
         bord="#ececec"; bsoft="#f3f4f6"; txt="#0d0d0d"; tsoft="#6b7280"; tmuted="#9ca3af"
-        hov="#ffffff"; act="#ffffff"; bbtn="#ffffff"; bhv="#f9fafb"; bbd="#e5e7eb"; cib="#ffffff"
+        hov="#ffffff"; act="#ffffff"; bbtn="#ffffff"; bhv="#f9fafb"; bbd="#e5e7eb"
 
     fs_base = {"small":"13px","medium":"15px","large":"17px"}[font_size]
     fs_h1 = {"small":"26px","medium":"30px","large":"34px"}[font_size]
     fs_tool = {"small":"22px","medium":"26px","large":"30px"}[font_size]
     msg_pad = "12px 0" if density == "compact" else "22px 0"
-    input_txt = "#0d0d0d" if dark else "#0d0d0d"  # always dark inside white input
-    input_bg = "#ffffff"  # force white input in both themes
 
     st.markdown(f"""
     <style>
@@ -138,7 +131,6 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
         [data-testid="stSidebar"] {{
             background: linear-gradient(180deg, {sbg1} 0%, {sbg2} 100%) !important;
             border-right: 1px solid {bord} !important;
-            min-width: 290px !important; max-width: 290px !important;
         }}
         [data-testid="stSidebar"] > div:first-child {{ padding: 1.5rem 0.9rem 1rem 0.9rem; }}
 
@@ -354,6 +346,75 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
         }}
         .time-badge {{ display: inline-block; font-size: 10px; color: {tmuted}; margin-left: 4px; }}
 
+        /* ============================================================
+           SIDEBAR TOGGLE BUTTON
+           - Large screens (≥ 1024px): HIDDEN — sidebar stays open
+           - Small/Medium (< 1024px): VISIBLE purple button
+           ============================================================ */
+        @media (min-width: 1024px) {{
+            [data-testid="stSidebar"] {{
+                margin-left: 0 !important;
+                transform: none !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+                display: block !important;
+                width: 290px !important;
+                min-width: 290px !important;
+                max-width: 290px !important;
+                position: relative !important;
+            }}
+            [data-testid="stSidebarCollapseButton"],
+            [data-testid="stSidebarCollapsedControl"],
+            [data-testid="collapsedControl"] {{
+                display: none !important;
+                visibility: hidden !important;
+                opacity: 0 !important;
+                pointer-events: none !important;
+            }}
+        }}
+
+        @media (max-width: 1023px) {{
+            [data-testid="stSidebarCollapseButton"],
+            [data-testid="stSidebarCollapsedControl"],
+            [data-testid="collapsedControl"] {{
+                display: flex !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+                position: fixed !important;
+                top: 12px !important;
+                left: 12px !important;
+                width: 44px !important;
+                height: 44px !important;
+                align-items: center !important;
+                justify-content: center !important;
+                background: #6c3ef5 !important;
+                background-color: #6c3ef5 !important;
+                border: none !important;
+                border-radius: 12px !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                box-shadow: 0 4px 16px rgba(108, 62, 245, 0.5) !important;
+                z-index: 2147483647 !important;
+                cursor: pointer !important;
+                transition: all 0.15s ease !important;
+            }}
+            [data-testid="stSidebarCollapseButton"] svg,
+            [data-testid="stSidebarCollapsedControl"] svg,
+            [data-testid="collapsedControl"] svg {{
+                fill: #ffffff !important;
+                color: #ffffff !important;
+                stroke: #ffffff !important;
+                width: 22px !important;
+                height: 22px !important;
+            }}
+            [data-testid="stSidebarCollapseButton"]:hover,
+            [data-testid="stSidebarCollapsedControl"]:hover,
+            [data-testid="collapsedControl"]:hover {{
+                background: #5a2ee0 !important;
+                transform: scale(1.08) !important;
+            }}
+        }}
+
         @media (max-width: 768px) {{
             [data-testid="stSidebar"] {{ min-width: 84vw !important; max-width: 84vw !important; }}
             .main .block-container {{ padding: 0.75rem !important; }}
@@ -365,29 +426,42 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
 load_css(dark=st.session_state.dark_mode, density=st.session_state.density, font_size=st.session_state.font_size)
 
 # ============================================================
-# JS — force sidebar toggle style
+# JS — force sidebar toggle style for mobile
 # ============================================================
 components.html("""
 <script>
 (function() {
     const doc = window.parent.document;
     function styleToggle() {
-        const sels = ['[data-testid="stSidebarCollapsedControl"]','[data-testid="stSidebarCollapseButton"]','[data-testid="collapsedControl"]'];
+        if (window.parent.innerWidth >= 1024) return; // skip on large screens
+        const sels = [
+            '[data-testid="stSidebarCollapsedControl"]',
+            '[data-testid="stSidebarCollapseButton"]',
+            '[data-testid="collapsedControl"]',
+            '[data-testid="stSidebarCollapsedControl"] button',
+            '[data-testid="stSidebarCollapseButton"] button',
+            'button[kind="headerNoPadding"]',
+            'button[kind="header"]'
+        ];
         const STYLE = 'background:#6c3ef5 !important;background-color:#6c3ef5 !important;'+
             'color:#ffffff !important;border:none !important;border-radius:12px !important;'+
-            'padding:10px !important;margin:12px !important;box-shadow:0 4px 16px rgba(108,62,245,0.5) !important;'+
-            'z-index:2147483647 !important;position:fixed !important;top:8px !important;left:8px !important;'+
+            'padding:0 !important;margin:0 !important;box-shadow:0 4px 16px rgba(108,62,245,0.5) !important;'+
+            'z-index:2147483647 !important;position:fixed !important;top:12px !important;left:12px !important;'+
             'width:44px !important;height:44px !important;display:flex !important;align-items:center !important;'+
             'justify-content:center !important;cursor:pointer !important;opacity:1 !important;visibility:visible !important;';
         sels.forEach(function(sel){
             doc.querySelectorAll(sel).forEach(function(el){
                 el.style.cssText = STYLE;
-                el.querySelectorAll('svg').forEach(function(s){ s.style.fill='#fff'; s.style.stroke='#fff'; });
+                el.querySelectorAll('svg').forEach(function(s){
+                    s.style.fill='#fff'; s.style.stroke='#fff'; s.style.color='#fff';
+                    s.style.width='22px'; s.style.height='22px';
+                });
             });
         });
     }
     styleToggle();
     setInterval(styleToggle, 500);
+    window.parent.addEventListener('resize', styleToggle);
 })();
 </script>
 """, height=0)
@@ -411,9 +485,6 @@ SYS_PROMPT = """You are Treats, a helpful AI assistant.
 IMPORTANT: You have access to tools. If the user asks for:
 - Voice / speech / audio in any language → CALL generate_speech
 - Image / picture / drawing → CALL generate_image
-- CV / resume → CALL build_cv
-- Video script → CALL build_video
-- Password → CALL make_password
 
 Always prefer calling tools over describing them. Be concise. Never use emojis unless the user does."""
 
@@ -421,7 +492,6 @@ TITLE_PROMPT = """Generate a short title (3-5 words). Return ONLY the title.
 
 Message: {message}"""
 
-# Tool schemas for function calling
 TOOLS_SCHEMA = [
     {
         "type": "function",
@@ -432,7 +502,7 @@ TOOLS_SCHEMA = [
                 "type": "object",
                 "properties": {
                     "text": {"type": "string", "description": "The text to convert to speech"},
-                    "language": {"type": "string", "enum": ["English", "Arabic", "French", "Spanish", "German"], "description": "Language of the text"}
+                    "language": {"type": "string", "enum": ["English", "Arabic", "French", "Spanish", "German"]}
                 },
                 "required": ["text", "language"]
             }
@@ -446,7 +516,7 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "prompt": {"type": "string", "description": "Description of the image to generate"}
+                    "prompt": {"type": "string", "description": "Description of the image"}
                 },
                 "required": ["prompt"]
             }
@@ -590,7 +660,6 @@ async def _tts(text, voice, rate, pitch, volume):
 LANG_CODE = {"English":"en","Arabic":"ar","French":"fr","Spanish":"es","German":"de"}
 
 def tts_speak(text, language="English", rate_val=1.0, pitch_val=0, vol_val=100):
-    """Helper to generate TTS from chat."""
     lang_code = LANG_CODE.get(language, "en")
     voices = fetch_voices()
     pool = voices.get(lang_code, [])
@@ -602,7 +671,7 @@ def tts_speak(text, language="English", rate_val=1.0, pitch_val=0, vol_val=100):
     return asyncio.run(_tts(text, voice, rate, pitch, vol))
 
 # ============================================================
-# TOOL ICONS + HEADER
+# TOOL ICONS
 # ============================================================
 ICONS = {
     "chat": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>""",
@@ -690,7 +759,7 @@ with st.sidebar:
                 with zipfile.ZipFile(buf, "w") as z:
                     for c, v in st.session_state.conversations.items():
                         safe = "".join(ch for ch in v["title"] if ch.isalnum() or ch in " -_")[:30]
-                        z.writestr(f"{safe or c}.json", json.dumps(v["messages"], ensure_ascii=False, indent=2))
+                        z.writestr(f"{safe or c}.json", json.dumps(v["messages"], ensure_ascii=False, indent=2, default=str))
                 st.download_button("⬇️ Download ZIP", buf.getvalue(), f"treats_all_{datetime.now():%Y%m%d}.zip", "application/zip", use_container_width=True)
 
     st.markdown('<div class="sidebar-label">AI Model</div>', unsafe_allow_html=True)
@@ -732,7 +801,7 @@ def render_chat():
     if not can_send():
         st.markdown(f'<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:16px 20px;border-radius:12px;margin-bottom:20px;"><strong>Daily limit reached</strong><br>You used {st.session_state.tokens_used:,} / {TOKEN_LIMIT:,} tokens.<br>Resets tomorrow at midnight.</div>', unsafe_allow_html=True)
         for m in msgs:
-            with st.chat_message(m["role"]): st.markdown(m["content"])
+            with st.chat_message(m["role"]): st.markdown(m.get("content",""))
         return
 
     if not msgs:
@@ -744,12 +813,9 @@ def render_chat():
                     if st.button(l, key=f"p_{i}", use_container_width=True):
                         st.session_state.pl_template = t; st.rerun()
 
-    # Render messages
     for i, m in enumerate(msgs):
         with st.chat_message(m["role"]):
-            # Tool result types
             mtype = m.get("type", "text")
-
             if mtype == "audio":
                 st.markdown(m.get("content", ""))
                 if "audio_bytes" in m:
@@ -761,7 +827,7 @@ def render_chat():
                     st.image(m["image_bytes"])
                     st.download_button("⬇️ PNG", m["image_bytes"], f"img_{i}.png", "image/png", key=f"dl_img_{i}")
             else:
-                st.markdown(m["content"])
+                st.markdown(m.get("content",""))
 
             if m["role"] == "assistant":
                 ts = fmt_time(m.get("ts", ""))
@@ -806,11 +872,9 @@ def render_chat():
             st.session_state.conversations[cid]["title"] = auto_title(prompt)
         st.rerun()
 
-    # Generate response with tool calling
     if msgs and msgs[-1]["role"] == "user":
         try:
             client = get_client()
-            # Build clean message list for Groq
             clean = []
             for m in msgs:
                 c = {"role": m["role"], "content": m.get("content","")}
@@ -818,7 +882,6 @@ def render_chat():
             full = [{"role":"system","content":SYS_PROMPT}] + clean
             hist = trim_history(full)
 
-            # First call — with tools
             response = client.chat.completions.create(
                 model=model,
                 messages=hist,
@@ -826,17 +889,13 @@ def render_chat():
                 tools=TOOLS_SCHEMA,
                 tool_choice="auto",
             )
-
             msg_obj = response.choices[0].message
 
-            # Check for tool calls
             if hasattr(msg_obj, "tool_calls") and msg_obj.tool_calls:
                 for tc in msg_obj.tool_calls:
                     fn = tc.function.name
-                    try:
-                        args = json.loads(tc.function.arguments)
-                    except:
-                        args = {}
+                    try: args = json.loads(tc.function.arguments)
+                    except: args = {}
 
                     if fn == "generate_speech":
                         text = args.get("text", "")
@@ -850,13 +909,7 @@ def render_chat():
                                 try:
                                     audio_bytes = tts_speak(text, lang)
                                     deduct_tool(cost, "TTS")
-                                    msgs.append({
-                                        "role":"assistant",
-                                        "content": f"🔊 **Audio generated** ({lang}):\n\n> {text}",
-                                        "type":"audio",
-                                        "audio_bytes": audio_bytes,
-                                        "ts": datetime.now().isoformat()
-                                    })
+                                    msgs.append({"role":"assistant","content": f"🔊 **Audio** ({lang}):\n\n> {text}","type":"audio","audio_bytes": audio_bytes,"ts": datetime.now().isoformat()})
                                     set_msgs(msgs); st.rerun()
                                 except Exception as e:
                                     msgs.append({"role":"assistant","content":f"❌ TTS failed: {e}","ts": datetime.now().isoformat()})
@@ -873,23 +926,14 @@ def render_chat():
                                 try:
                                     img_bytes = gen_image(prompt_txt, 1024, 1024, "flux")
                                     deduct_tool(cost, "Image")
-                                    msgs.append({
-                                        "role":"assistant",
-                                        "content": f"🎨 **Image generated:**\n\n> {prompt_txt}",
-                                        "type":"image",
-                                        "image_bytes": img_bytes,
-                                        "ts": datetime.now().isoformat()
-                                    })
+                                    msgs.append({"role":"assistant","content": f"🎨 **Image:**\n\n> {prompt_txt}","type":"image","image_bytes": img_bytes,"ts": datetime.now().isoformat()})
                                     set_msgs(msgs); st.rerun()
                                 except Exception as e:
                                     msgs.append({"role":"assistant","content":f"❌ Image failed: {e}","ts": datetime.now().isoformat()})
                                     set_msgs(msgs); st.rerun()
                 return
 
-            # No tool call — stream normal response
-            stream = client.chat.completions.create(
-                model=model, messages=hist, temperature=0.7, stream=True
-            )
+            stream = client.chat.completions.create(model=model, messages=hist, temperature=0.7, stream=True)
             with st.chat_message("assistant"):
                 ph = st.empty(); full_txt = ""
                 for ch in stream:
@@ -905,7 +949,6 @@ def render_chat():
 
         except TreatsError as e: st.error(str(e))
         except Exception as e:
-            # If tools fail (model doesn't support), fall back to plain streaming
             try:
                 stream = client.chat.completions.create(model=model, messages=hist, temperature=0.7, stream=True)
                 with st.chat_message("assistant"):
