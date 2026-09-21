@@ -23,9 +23,6 @@ st.set_page_config(
 # ============================================================
 TOKEN_LIMIT = 5000
 
-# Admin emails from secrets (fallback = empty list)
-ADMIN_EMAILS = st.secrets.get("ADMIN_EMAILS", [])
-
 # ============================================================
 # INLINE SVG LOGO
 # ============================================================
@@ -57,65 +54,71 @@ LOGO_URI = "data:image/svg+xml;base64," + base64.b64encode(LOGO_SVG.encode()).de
 
 
 # ============================================================
-# SESSION STATE
+# SESSION STATE INIT
 # ============================================================
 if "dark_mode" not in st.session_state:
     st.session_state.dark_mode = False
+if "dev_mode" not in st.session_state:
+    st.session_state.dev_mode = False
+if "show_dev_input" not in st.session_state:
+    st.session_state.show_dev_input = False
 if "tokens_used" not in st.session_state:
     st.session_state.tokens_used = 0
 if "token_date" not in st.session_state:
     st.session_state.token_date = date.today().isoformat()
-if "show_dev_input" not in st.session_state:
-    st.session_state.show_dev_input = False
 
 
 # ============================================================
-# DAILY TOKEN RESET
+# URL-BASED PERSISTENCE + DAILY RESET
 # ============================================================
+def restore_from_url():
+    """Restore token usage from URL query params."""
+    try:
+        qp = st.query_params
+        saved_date = qp.get("d", "")
+        saved_used = qp.get("u", "0")
+        if saved_date:
+            st.session_state.token_date = saved_date
+        if saved_used:
+            try:
+                st.session_state.tokens_used = int(saved_used)
+            except ValueError:
+                st.session_state.tokens_used = 0
+    except Exception:
+        pass
+
+
+def save_to_url():
+    """Save token usage to URL query params."""
+    try:
+        st.query_params["d"] = st.session_state.token_date
+        st.query_params["u"] = str(st.session_state.tokens_used)
+    except Exception:
+        pass
+
+
 def check_daily_reset():
+    """Reset tokens if it's a new day."""
     today = date.today().isoformat()
     if st.session_state.token_date != today:
         st.session_state.token_date = today
         st.session_state.tokens_used = 0
+        save_to_url()
+
+
+# Restore state on load
+if "restored" not in st.session_state:
+    restore_from_url()
+    st.session_state.restored = True
 
 check_daily_reset()
-
-
-# ============================================================
-# AUTH HELPERS
-# ============================================================
-def is_admin():
-    """Check if logged-in user is an admin."""
-    try:
-        email = st.user.email or ""
-        return email.lower() in [e.lower() for e in ADMIN_EMAILS]
-    except Exception:
-        return False
-
-
-def is_logged_in():
-    try:
-        return st.user.is_logged_in
-    except Exception:
-        return False
-
-
-def current_user():
-    try:
-        return {
-            "email": st.user.email or "",
-            "name": st.user.name or (st.user.email.split("@")[0] if st.user.email else "User"),
-            "picture": getattr(st.user, "picture", None),
-        }
-    except Exception:
-        return {"email": "", "name": "User", "picture": None}
 
 
 # ============================================================
 # TOKEN HELPERS
 # ============================================================
 def is_unlimited():
-    return is_admin()
+    return st.session_state.dev_mode
 
 
 def tokens_remaining():
@@ -133,6 +136,7 @@ def can_send():
 def add_tokens(n):
     if not is_unlimited():
         st.session_state.tokens_used += n
+        save_to_url()
 
 
 # ============================================================
@@ -261,58 +265,6 @@ def load_css(dark=False):
         }}
         .sidebar-footer strong {{ color: #6c3ef5; font-weight: 600; }}
 
-        /* ---------- USER CARD ---------- */
-        .user-card {{
-            background: {surface};
-            border: 1px solid {border};
-            border-radius: 12px;
-            padding: 12px 14px;
-            margin: 8px 0 12px 0;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }}
-        .user-card img {{
-            width: 38px; height: 38px; border-radius: 50%; border: 2px solid #ddd6fe; flex-shrink: 0;
-        }}
-        .user-card .avatar-fallback {{
-            width: 38px; height: 38px; border-radius: 50%;
-            background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%);
-            color: white; display: flex; align-items: center; justify-content: center;
-            font-weight: 700; font-size: 15px; flex-shrink: 0;
-        }}
-        .user-card .u-info {{ flex: 1; min-width: 0; }}
-        .user-card .u-name {{ font-size: 13px; font-weight: 700; color: {text}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-        .user-card .u-email {{ font-size: 11px; color: {text_soft}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-        .user-card .u-role {{ font-size: 10px; color: #6c3ef5; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }}
-
-        /* ---------- LOGIN PAGE ---------- */
-        .login-wrap {{
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            min-height: 80vh; padding: 40px 20px; text-align: center;
-        }}
-        .login-logo {{
-            width: 120px; height: 120px; margin: 0 auto 32px auto;
-            filter: drop-shadow(0 14px 36px rgba(108, 62, 245, 0.3));
-            animation: float 3s ease-in-out infinite;
-        }}
-        @keyframes float {{
-            0%, 100% {{ transform: translateY(0); }}
-            50% {{ transform: translateY(-6px); }}
-        }}
-        .login-title {{
-            font-size: 32px; font-weight: 800; letter-spacing: -0.03em;
-            color: {text}; margin: 0 0 12px 0;
-        }}
-        .login-sub {{
-            font-size: 15px; color: {text_soft}; margin: 0 0 36px 0;
-        }}
-        .login-footer {{
-            position: fixed; bottom: 24px; left: 0; right: 0; text-align: center;
-            font-size: 12px; color: {text_muted};
-        }}
-
-        /* Token panel */
         .token-panel {{
             background: {surface_2}; border: 1px solid {border};
             border-radius: 10px; padding: 10px 14px; margin: 8px 0; font-size: 12px; color: {text_soft};
@@ -443,6 +395,10 @@ def load_css(dark=False):
             filter: drop-shadow(0 14px 36px rgba(108, 62, 245, 0.22)) !important;
             animation: float 3s ease-in-out infinite;
         }}
+        @keyframes float {{
+            0%, 100% {{ transform: translateY(0); }}
+            50% {{ transform: translateY(-6px); }}
+        }}
 
         details {{
             border: 1px solid {border_soft}; border-radius: 12px;
@@ -462,8 +418,6 @@ def load_css(dark=False):
                 padding: 0.75rem 0.75rem 3rem 0.75rem !important; max-width: 100% !important;
             }}
             .treats-hero .hero-logo {{ width: 120px !important; height: 120px !important; }}
-            .login-logo {{ width: 100px; height: 100px; }}
-            .login-title {{ font-size: 26px; }}
         }}
     </style>
     """, unsafe_allow_html=True)
@@ -503,44 +457,6 @@ TITLE_PROMPT = """Generate a short title (3-5 words) for this conversation.
 Return ONLY the title, no quotes, no punctuation.
 
 User message: {message}"""
-
-
-# ============================================================
-# LOGIN PAGE
-# ============================================================
-def render_login_page():
-    st.markdown(
-        f'<div class="login-wrap">'
-        f'<img src="{LOGO_URI}" class="login-logo" alt="Treats">'
-        f'<h1 class="login-title">Welcome to Treats</h1>'
-        f'<p class="login-sub">Sign in to continue to your AI assistant</p>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    # Center column for button
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        if st.button("Sign in with Google", type="primary", use_container_width=True, key="google_login"):
-            try:
-                st.login("google")
-            except Exception as e:
-                st.error(f"Login failed: {e}")
-
-    st.markdown(
-        '<div class="login-footer">'
-        'Treats v3.0 · Powered by Groq'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-
-# ============================================================
-# AUTH GATE
-# ============================================================
-if not is_logged_in():
-    render_login_page()
-    st.stop()
 
 
 # ============================================================
@@ -721,8 +637,6 @@ def render_tool_header(theme_key, title, subtitle):
 # SIDEBAR
 # ============================================================
 init_conversations()
-user = current_user()
-admin_user = is_admin()
 
 TOOLS = {
     "Chat": "chat",
@@ -742,28 +656,6 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    # User card
-    initial = (user["name"][0] if user["name"] else "U").upper()
-    avatar_html = (
-        f'<img src="{user["picture"]}" alt="">' if user.get("picture")
-        else f'<div class="avatar-fallback">{initial}</div>'
-    )
-    role_label = "OWNER" if admin_user else "USER"
-    st.markdown(
-        f'<div class="user-card">'
-        f'{avatar_html}'
-        f'<div class="u-info">'
-        f'<div class="u-name">{user["name"]}</div>'
-        f'<div class="u-email">{user["email"]}</div>'
-        f'<div class="u-role">{role_label}</div>'
-        f'</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    if st.button("Sign out", key="logout_btn", use_container_width=True):
-        st.logout()
-
     # Theme toggle
     c1, c2 = st.columns([3, 1])
     with c1:
@@ -780,7 +672,7 @@ with st.sidebar:
     if is_unlimited():
         st.markdown(
             '<div class="token-panel">'
-            '<div class="row"><span>Status</span><span class="dev">Owner</span></div>'
+            '<div class="row"><span>Status</span><span class="dev">Developer</span></div>'
             '<div class="row"><span>Limit</span><span class="dev">Unlimited</span></div>'
             f'<div class="row"><span>Used</span><span class="val">{st.session_state.tokens_used:,}</span></div>'
             '</div>',
@@ -835,9 +727,35 @@ with st.sidebar:
     st.markdown('<div class="sidebar-label">AI Model</div>', unsafe_allow_html=True)
     model = st.selectbox("AI Model", AVAILABLE_MODELS, key="model", label_visibility="collapsed")
 
+    # Developer button
+    st.markdown("<div style='height: 20px'></div>", unsafe_allow_html=True)
+    dev_label = "🔓 Developer Mode: ON" if st.session_state.dev_mode else "Developer"
+    if st.button(dev_label, key="dev_btn", use_container_width=True):
+        if st.session_state.dev_mode:
+            st.session_state.dev_mode = False
+            st.session_state.show_dev_input = False
+            st.rerun()
+        else:
+            st.session_state.show_dev_input = not st.session_state.show_dev_input
+            st.rerun()
+
+    if st.session_state.show_dev_input and not st.session_state.dev_mode:
+        with st.form("dev_form", clear_on_submit=True):
+            pwd = st.text_input("Password", type="password", label_visibility="collapsed", placeholder="Enter developer password")
+            submit = st.form_submit_button("Unlock", use_container_width=True)
+            if submit:
+                correct = st.secrets.get("DEV_PASSWORD", "")
+                if correct and pwd == correct:
+                    st.session_state.dev_mode = True
+                    st.session_state.show_dev_input = False
+                    st.toast("Developer mode enabled — unlimited tokens", icon="✅")
+                    st.rerun()
+                else:
+                    st.error("Wrong password")
+
     st.markdown(
         '<div class="sidebar-footer">'
-        '<strong>Treats v3.0</strong><br>'
+        '<strong>Treats v2.3</strong><br>'
         'Powered by Groq'
         '</div>',
         unsafe_allow_html=True,
@@ -866,7 +784,7 @@ def render_chat():
             'padding: 16px 20px; border-radius: 12px; margin-bottom: 20px;">'
             '<strong>Daily token limit reached</strong><br>'
             f'You have used {st.session_state.tokens_used:,} of {TOKEN_LIMIT:,} tokens today.<br>'
-            'Your limit resets tomorrow at midnight.'
+            'Your limit resets tomorrow at midnight. Or contact the developer for unlimited access.'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -980,7 +898,7 @@ def render_chat():
 
 
 # ============================================================
-# TOOL: CV BUILDER
+# TOOL: CV
 # ============================================================
 CV_TEMPLATES = {
     "Modern": "Use a modern layout with a colored header, clean two-column layout.",
