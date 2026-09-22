@@ -345,6 +345,44 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
         }}
         .time-badge {{ display: inline-block; font-size: 10px; color: {tmuted}; margin-left: 4px; }}
 
+        /* ============================================================
+           POPOVER (☰ Menu)
+           ============================================================ */
+        [data-testid="stPopover"] > button {{
+            background: {bbtn} !important;
+            color: {txt} !important;
+            border: 1px solid {bbd} !important;
+            border-radius: 8px !important;
+            padding: 4px 12px !important;
+            font-size: 18px !important;
+            font-weight: 700 !important;
+            line-height: 1 !important;
+            min-height: 34px !important;
+            height: 34px !important;
+            transition: all 0.15s ease !important;
+        }}
+        [data-testid="stPopover"] > button:hover {{
+            background: {bhv} !important;
+            border-color: #a855f7 !important;
+            color: #6c3ef5 !important;
+        }}
+        [data-testid="stPopoverBody"] {{
+            background: {surf} !important;
+            border: 1px solid {bord} !important;
+            border-radius: 12px !important;
+            padding: 10px !important;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12) !important;
+        }}
+        [data-testid="stPopoverBody"] .stButton > button {{
+            width: 100% !important;
+            text-align: left !important;
+            justify-content: flex-start !important;
+            margin-bottom: 4px !important;
+        }}
+
+        /* ============================================================
+           SIDEBAR TOGGLE
+           ============================================================ */
         @media (min-width: 1024px) {{
             [data-testid="stSidebar"] {{
                 margin-left: 0 !important;
@@ -401,12 +439,6 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
                 width: 22px !important;
                 height: 22px !important;
             }}
-            [data-testid="stSidebarCollapseButton"]:hover,
-            [data-testid="stSidebarCollapsedControl"]:hover,
-            [data-testid="collapsedControl"]:hover {{
-                background: #5a2ee0 !important;
-                transform: scale(1.08) !important;
-            }}
         }}
 
         @media (max-width: 768px) {{
@@ -420,7 +452,7 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
 load_css(dark=st.session_state.dark_mode, density=st.session_state.density, font_size=st.session_state.font_size)
 
 # ============================================================
-# JS — force sidebar toggle style for mobile
+# JS — sidebar toggle style
 # ============================================================
 components.html("""
 <script>
@@ -461,7 +493,7 @@ components.html("""
 """, height=0)
 
 # ============================================================
-# JS — Auto-scroll to latest message after sending
+# JS — auto-scroll to latest message
 # ============================================================
 components.html("""
 <script>
@@ -479,10 +511,7 @@ components.html("""
         if (messages.length === 0) return;
         const last = messages[messages.length - 1];
         try {
-            last.scrollIntoView({
-                behavior: 'smooth',
-                block: 'start'
-            });
+            last.scrollIntoView({ behavior: 'smooth', block: 'start' });
         } catch(e) {
             last.scrollIntoView();
         }
@@ -490,15 +519,7 @@ components.html("""
 
     function checkAndScroll() {
         const count = getMsgCount();
-
-        // On first detection, just record count
-        if (!hasInitialized) {
-            lastCount = count;
-            hasInitialized = true;
-            return;
-        }
-
-        // If new message(s) added, scroll
+        if (!hasInitialized) { lastCount = count; hasInitialized = true; return; }
         if (count > lastCount) {
             setTimeout(scrollToLatest, 250);
             setTimeout(scrollToLatest, 700);
@@ -508,12 +529,9 @@ components.html("""
     }
 
     try {
-        const observer = new MutationObserver(function() {
-            checkAndScroll();
-        });
+        const observer = new MutationObserver(function() { checkAndScroll(); });
         observer.observe(doc.body, { childList: true, subtree: true });
     } catch(e) {}
-
     setInterval(checkAndScroll, 700);
 })();
 </script>
@@ -834,7 +852,7 @@ with st.sidebar:
                     st.toast("Developer mode enabled"); st.rerun()
                 else: st.error("Wrong password")
 
-    st.markdown('<div class="sidebar-footer"><strong>Treats v3.1</strong><br>Powered by Groq<br><br><span class="kbd">Enter</span> send · <span class="kbd">Shift+Enter</span> new line</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-footer"><strong>Treats v3.2</strong><br>Powered by Groq<br><br><span class="kbd">Enter</span> send · <span class="kbd">Shift+Enter</span> new line</div>', unsafe_allow_html=True)
 
 # ============================================================
 # CHAT
@@ -887,33 +905,21 @@ def render_chat():
                 tok = count_tokens(m.get("content", ""))
                 if tok:
                     st.markdown(f'<span class="token-badge">{tok} tokens</span><span class="time-badge">{ts}</span>', unsafe_allow_html=True)
-                c1, c2, c3, _ = st.columns([1, 1, 1, 7])
-                with c1:
-                    if st.button("📋 Copy", key=f"cp_{i}"):
-                        copy_to_clipboard(m.get("content",""), f"cp_{i}"); st.toast("Copied!")
-                with c2:
-                    if i == len(msgs) - 1:
-                        if st.button("🔄 Retry", key=f"rg_{i}"):
-                            set_msgs(msgs[:i]); st.rerun()
-                with c3:
-                    if st.button("🗑", key=f"dl_{i}"):
-                        set_msgs(msgs[:i] + msgs[i+1:]); st.rerun()
 
-    if msgs:
-        c1, c2, c3 = st.columns([1, 1, 1])
-        with c1:
-            if st.button("New chat", key="nci", use_container_width=True): new_conv(); st.rerun()
-        with c2:
-            if st.button("Duplicate", key="dup", use_container_width=True): dup_conv(st.session_state.active_conversation); st.rerun()
-        with c3:
-            with st.expander("Export"):
-                a, b = st.columns(2)
-                with a:
-                    md = "\n\n".join(f"**{m['role']}:** {m.get('content','')}" for m in msgs)
-                    st.download_button("MD", md, f"treats_{datetime.now():%Y%m%d}.md", "text/markdown", use_container_width=True)
-                with b:
-                    clean = [{"role": m["role"], "content": m.get("content","")} for m in msgs]
-                    st.download_button("JSON", json.dumps(clean, ensure_ascii=False, indent=2), f"treats_{datetime.now():%Y%m%d}.json", "application/json", use_container_width=True)
+                # ☰ Popover menu: Copy / Retry / Delete
+                c1, _ = st.columns([1, 8])
+                with c1:
+                    with st.popover("☰", use_container_width=False):
+                        if st.button("📋 Copy", key=f"cp_{i}", use_container_width=True):
+                            copy_to_clipboard(m.get("content",""), f"cp_{i}")
+                            st.toast("Copied!")
+                        if i == len(msgs) - 1:
+                            if st.button("🔄 Retry", key=f"rg_{i}", use_container_width=True):
+                                set_msgs(msgs[:i])
+                                st.rerun()
+                        if st.button("🗑 Delete", key=f"dl_{i}", use_container_width=True):
+                            set_msgs(msgs[:i] + msgs[i+1:])
+                            st.rerun()
 
     prompt = st.chat_input("Message Treats...")
     if prompt:
