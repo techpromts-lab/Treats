@@ -18,12 +18,7 @@ st.set_page_config(page_title="Treats", page_icon="🧠", layout="wide",
 
 TOKEN_LIMIT = 5000
 TOKEN_WARN_AT = 0.8
-
-TOOL_COSTS = {
-    "tts": 100,
-    "image": 150,
-    "password": 10,
-}
+TOOL_COSTS = {"tts": 100, "image": 150, "password": 10}
 
 # ============================================================
 # LOGO
@@ -51,7 +46,7 @@ defaults = {
     "dark_mode": False, "tokens_used": 0, "token_date": date.today().isoformat(),
     "dev_mode": False, "show_dev_input": False, "density": "comfortable",
     "font_size": "medium", "conv_search": "", "rename_conv": None,
-    "warned_80": False, "show_settings": False,
+    "warned_80": False, "show_settings": False, "gallery": [],
 }
 for k, v in defaults.items():
     if k not in st.session_state: st.session_state[k] = v
@@ -68,20 +63,14 @@ check_daily_reset()
 # TOKEN HELPERS
 # ============================================================
 def is_unlimited(): return st.session_state.dev_mode
-def can_send():
-    if is_unlimited(): return True
-    return st.session_state.tokens_used < TOKEN_LIMIT
-def can_use_tool(cost=0):
-    if is_unlimited(): return True
-    return st.session_state.tokens_used + cost <= TOKEN_LIMIT
+def can_send(): return is_unlimited() or st.session_state.tokens_used < TOKEN_LIMIT
+def can_use_tool(cost=0): return is_unlimited() or st.session_state.tokens_used + cost <= TOKEN_LIMIT
 def add_tokens(n):
     if not is_unlimited():
         st.session_state.tokens_used += n
-        if (st.session_state.tokens_used >= TOKEN_LIMIT * TOKEN_WARN_AT
-                and not st.session_state.warned_80):
+        if st.session_state.tokens_used >= TOKEN_LIMIT * TOKEN_WARN_AT and not st.session_state.warned_80:
             st.session_state.warned_80 = True
             st.toast(f"⚠️ You've used {int(TOKEN_WARN_AT*100)}% of your daily tokens")
-
 def deduct_tool(cost, tool_name):
     if not is_unlimited():
         st.session_state.tokens_used += cost
@@ -91,25 +80,34 @@ def deduct_tool(cost, tool_name):
 # CSS
 # ============================================================
 def load_css(dark=False, density="comfortable", font_size="medium"):
-    if dark:
-        bg="#0d0d0d"; sbg1="#161616"; sbg2="#1a1a1a"; surf="#1a1a1a"; surf2="#232323"
-        bord="#2a2a2a"; bsoft="#232323"; txt="#ececec"; tsoft="#a0a0a0"; tmuted="#6b6b6b"
-        hov="#232323"; act="#2d2d2d"; bbtn="#1a1a1a"; bhv="#232323"; bbd="#2a2a2a"
-    else:
-        bg="#ffffff"; sbg1="#faf9ff"; sbg2="#f5f3ff"; surf="#ffffff"; surf2="#f7f7f8"
-        bord="#ececec"; bsoft="#f3f4f6"; txt="#0d0d0d"; tsoft="#6b7280"; tmuted="#9ca3af"
-        hov="#ffffff"; act="#ffffff"; bbtn="#ffffff"; bhv="#f9fafb"; bbd="#e5e7eb"
+    C = {
+        True: dict(bg="#0b0b0f", sbg1="#141418", sbg2="#1a1a20", surf="#15151b", surf2="#1f1f26",
+                   surf3="#25252d", bord="#26262e", bsoft="#1d1d23", txt="#f0f0f3", tsoft="#a0a0ab",
+                   tmuted="#6e6e7a", hov="#1f1f26", act="#272730", bbtn="#1a1a20", bhv="#23232b",
+                   bbd="#2c2c35", input_bg="#15151b", msg_bg="#1a1a20", accent="#a855f7", accent2="#6c3ef5"),
+        False: dict(bg="#ffffff", sbg1="#fbfaff", sbg2="#f5f3ff", surf="#ffffff", surf2="#f9f9fb",
+                    surf3="#f3f3f7", bord="#ececf1", bsoft="#f4f4f8", txt="#0e0e11", tsoft="#6b6b78",
+                    tmuted="#9a9aa8", hov="#f7f5ff", act="#f0ecff", bbtn="#ffffff", bhv="#f7f7fb",
+                    bbd="#e5e5ed", input_bg="#ffffff", msg_bg="#f9f9fc", accent="#6c3ef5", accent2="#a855f7"),
+    }[dark]
 
-    fs_base = {"small":"13px","medium":"15px","large":"17px"}[font_size]
-    fs_h1 = {"small":"26px","medium":"30px","large":"34px"}[font_size]
-    fs_tool = {"small":"22px","medium":"26px","large":"30px"}[font_size]
-    msg_pad = "12px 0" if density == "compact" else "22px 0"
+    fs_base = {"small":"13.5px","medium":"15px","large":"17px"}[font_size]
+    fs_h1 = {"small":"26px","medium":"30px","large":"35px"}[font_size]
+    fs_tool = {"small":"23px","medium":"27px","large":"31px"}[font_size]
+    msg_pad = "14px 0" if density == "compact" else "24px 0"
 
     st.markdown(f"""
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-        html, body, [class*="css"] {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }}
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
 
+        html, body, [class*="css"] {{
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
+        }}
+
+        /* ---------- HIDE CHROME ---------- */
         #MainMenu, footer, [data-testid="stDecoration"], [data-testid="stStatusWidget"],
         [data-testid="stAppDeployButton"], [data-testid="stMainMenu"],
         [data-testid="stToolbarActions"] {{ display: none !important; }}
@@ -117,8 +115,14 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
 
         html, body, .stApp, [data-testid="stAppViewContainer"],
         [data-testid="stAppViewContainer"] > .main, section.main, [data-testid="stMain"] {{
-            background: {bg} !important; color: {txt} !important;
+            background: {C['bg']} !important; color: {C['txt']} !important;
         }}
+
+        /* ---------- SCROLLBAR ---------- */
+        ::-webkit-scrollbar {{ width: 8px; height: 8px; }}
+        ::-webkit-scrollbar-track {{ background: transparent; }}
+        ::-webkit-scrollbar-thumb {{ background: {C['bord']}; border-radius: 4px; }}
+        ::-webkit-scrollbar-thumb:hover {{ background: {C['tmuted']}; }}
 
         * {{ -webkit-tap-highlight-color: transparent; }}
         button, .stButton, .stDownloadButton, label, h1,h2,h3,h4,h5,h6,
@@ -128,280 +132,369 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
         [data-testid="stChatMessage"], .stMarkdown, .stTextArea textarea, .stTextInput input,
         pre, code {{ -webkit-user-select: text; user-select: text; }}
 
+        /* ---------- SIDEBAR ---------- */
         [data-testid="stSidebar"] {{
-            background: linear-gradient(180deg, {sbg1} 0%, {sbg2} 100%) !important;
-            border-right: 1px solid {bord} !important;
+            background: linear-gradient(180deg, {C['sbg1']} 0%, {C['sbg2']} 100%) !important;
+            border-right: 1px solid {C['bord']} !important;
         }}
-        [data-testid="stSidebar"] > div:first-child {{ padding: 1.5rem 0.9rem 1rem 0.9rem; }}
+        [data-testid="stSidebar"] > div:first-child {{ padding: 1.5rem 1rem 1rem 1rem; }}
 
-        .treats-brand {{ padding: 4px 10px 22px 10px; display: flex; align-items: center; gap: 12px; }}
-        .treats-brand img {{ width: 44px; height: 44px; filter: drop-shadow(0 4px 12px rgba(108, 62, 245, 0.25)); }}
+        .treats-brand {{
+            padding: 6px 12px 24px 12px; display: flex; align-items: center; gap: 12px;
+        }}
+        .treats-brand img {{
+            width: 42px; height: 42px;
+            filter: drop-shadow(0 4px 16px rgba(108, 62, 245, 0.35));
+            transition: transform 0.3s ease;
+        }}
+        .treats-brand:hover img {{ transform: rotate(-8deg) scale(1.05); }}
         .treats-brand .name {{
-            font-size: 20px; font-weight: 800; letter-spacing: -0.03em;
+            font-size: 21px; font-weight: 800; letter-spacing: -0.04em;
             background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%);
             -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
         }}
 
         .sidebar-label {{
             font-size: 10px; font-weight: 700; text-transform: uppercase;
-            letter-spacing: 0.1em; color: {tmuted}; padding: 10px 14px 6px 14px; margin-top: 6px;
+            letter-spacing: 0.12em; color: {C['tmuted']};
+            padding: 12px 14px 6px 14px; margin-top: 4px;
         }}
 
-        [data-testid="stSidebar"] [data-testid="stRadio"] > div[role="radiogroup"] {{ gap: 3px !important; display: flex; flex-direction: column; }}
+        /* Radio nav */
+        [data-testid="stSidebar"] [data-testid="stRadio"] > div[role="radiogroup"] {{ gap: 4px !important; display: flex; flex-direction: column; }}
         [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {{
             display: flex !important; align-items: center !important; gap: 12px !important;
-            padding: 10px 14px !important; margin: 0 !important; border-radius: 10px !important;
-            cursor: pointer !important; transition: all 0.15s ease !important;
-            font-size: 14px !important; font-weight: 500 !important; color: {txt} !important;
+            padding: 11px 14px !important; margin: 0 !important; border-radius: 11px !important;
+            cursor: pointer !important; transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            font-size: 14px !important; font-weight: 500 !important; color: {C['txt']} !important;
             width: 100% !important; background: transparent !important; border: 1px solid transparent !important;
         }}
-        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:hover {{ background: {hov} !important; border-color: {bord} !important; transform: translateX(2px); }}
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:hover {{
+            background: {C['hov']} !important; border-color: {C['bord']} !important; transform: translateX(3px);
+        }}
         [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {{ display: none !important; }}
         [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]::before {{
-            content: '' !important; width: 20px !important; height: 20px !important; flex-shrink: 0 !important;
+            content: '' !important; width: 22px !important; height: 22px !important; flex-shrink: 0 !important;
             background-repeat: no-repeat !important; background-position: center !important;
-            background-size: 20px 20px !important; border-radius: 6px; padding: 4px; box-sizing: content-box;
+            background-size: 20px 20px !important; border-radius: 7px;
+            padding: 5px; box-sizing: content-box;
+            transition: transform 0.18s ease;
         }}
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:hover::before {{ transform: scale(1.08); }}
+
         label[data-baseweb="radio"]:nth-of-type(1)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2.2'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>") !important; background-color: #eef2ff; }}
         label[data-baseweb="radio"]:nth-of-type(2)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2.2'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/><polyline points='14 2 14 8 20 8'/></svg>") !important; background-color: #dbeafe; }}
         label[data-baseweb="radio"]:nth-of-type(3)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2310b981' stroke-width='2.2'><rect x='3' y='11' width='18' height='11' rx='2'/><path d='M7 11V7a5 5 0 0 1 10 0v4'/></svg>") !important; background-color: #d1fae5; }}
         label[data-baseweb="radio"]:nth-of-type(4)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f97316' stroke-width='2.2'><polygon points='23 7 16 12 23 17 23 7'/><rect x='1' y='5' width='15' height='14' rx='2'/></svg>") !important; background-color: #ffedd5; }}
         label[data-baseweb="radio"]:nth-of-type(5)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ec4899' stroke-width='2.2'><polygon points='11 5 6 9 2 9 2 15 6 15 11 19 11 5'/></svg>") !important; background-color: #fce7f3; }}
         label[data-baseweb="radio"]:nth-of-type(6)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b5cf6' stroke-width='2.2'><rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='8.5' cy='8.5' r='1.5'/><polyline points='21 15 16 10 5 21'/></svg>") !important; background-color: #ede9fe; }}
-        label[data-baseweb="radio"]:has(input:checked) {{ background: {act} !important; border-color: {bord} !important; font-weight: 700 !important; }}
+
+        label[data-baseweb="radio"]:has(input:checked) {{
+            background: {C['act']} !important; border-color: {C['bord']} !important; font-weight: 700 !important;
+            box-shadow: 0 2px 8px rgba(108, 62, 245, 0.08);
+        }}
         [data-testid="stSidebar"] [data-testid="stRadio"] > label:first-child {{ display: none !important; }}
 
         [data-testid="stSidebar"] [data-testid="stSelectbox"] > label {{
             font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important;
-            letter-spacing: 0.1em !important; color: {tmuted} !important; padding-left: 2px !important;
+            letter-spacing: 0.12em !important; color: {C['tmuted']} !important; padding-left: 2px !important;
         }}
         [data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div {{
-            background: {surf} !important; border: 1px solid {bord} !important;
-            border-radius: 10px !important; font-size: 13px !important; color: {txt} !important;
+            background: {C['surf']} !important; border: 1px solid {C['bord']} !important;
+            border-radius: 11px !important; font-size: 13px !important; color: {C['txt']} !important;
+            transition: border 0.15s ease;
+        }}
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div:hover {{
+            border-color: {C['accent']} !important;
         }}
 
         .sidebar-footer {{
-            padding: 14px; color: {tmuted}; font-size: 11px; line-height: 1.7;
-            border-top: 1px solid {bord}; margin-top: 16px;
+            padding: 16px; color: {C['tmuted']}; font-size: 11px; line-height: 1.75;
+            border-top: 1px solid {C['bord']}; margin-top: 16px;
+            text-align: center;
         }}
-        .sidebar-footer strong {{ color: #6c3ef5; font-weight: 600; }}
+        .sidebar-footer strong {{ color: {C['accent']}; font-weight: 700; }}
         .sidebar-footer .kbd {{
-            display: inline-block; padding: 1px 6px; background: {surf2};
-            border: 1px solid {bord}; border-radius: 4px; font-size: 10px;
-            font-family: monospace; color: {tsoft}; margin: 0 2px;
+            display: inline-block; padding: 2px 7px; background: {C['surf2']};
+            border: 1px solid {C['bord']}; border-radius: 5px; font-size: 10px;
+            font-family: 'JetBrains Mono', monospace; color: {C['tsoft']}; margin: 0 2px;
         }}
 
+        /* Token panel */
         .token-panel {{
-            background: {surf2}; border: 1px solid {bord};
-            border-radius: 10px; padding: 10px 14px; margin: 6px 0; font-size: 12px; color: {tsoft};
+            background: {C['surf2']}; border: 1px solid {C['bord']};
+            border-radius: 12px; padding: 12px 15px; margin: 6px 0 8px 0;
+            font-size: 12px; color: {C['tsoft']};
         }}
-        .token-panel .row {{ display: flex; justify-content: space-between; margin: 4px 0; }}
-        .token-panel .val {{ color: {txt}; font-weight: 700; }}
+        .token-panel .row {{ display: flex; justify-content: space-between; margin: 5px 0; align-items: center; }}
+        .token-panel .val {{ color: {C['txt']}; font-weight: 700; font-variant-numeric: tabular-nums; }}
         .token-panel .dev {{ color: #10b981; font-weight: 700; }}
         .token-panel .warn {{ color: #f59e0b; font-weight: 700; }}
         .token-panel .danger {{ color: #ef4444; font-weight: 700; }}
-        .token-bar-wrap {{ height: 6px; background: {bord}; border-radius: 3px; overflow: hidden; margin: 8px 0 4px 0; }}
-        .token-bar-fill {{ height: 100%; border-radius: 3px; transition: width 0.3s; }}
+        .token-bar-wrap {{ height: 5px; background: {C['bord']}; border-radius: 3px; overflow: hidden; margin: 10px 0 2px 0; }}
+        .token-bar-fill {{ height: 100%; border-radius: 3px; transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }}
 
+        /* ---------- MAIN ---------- */
         section.main, [data-testid="stMain"] {{
             display: flex !important; flex-direction: column !important;
             align-items: center !important; width: 100% !important;
         }}
         section.main > div.block-container, .main .block-container {{
-            width: 100% !important; max-width: 800px !important;
-            margin: 0 auto !important; padding: 1.5rem 1.5rem 5rem 1.5rem !important;
+            width: 100% !important; max-width: 820px !important;
+            margin: 0 auto !important; padding: 2rem 1.5rem 6rem 1.5rem !important;
         }}
 
         [data-testid="stChatInput"], [data-testid="stBottomBlockContainer"] {{
-            max-width: 800px !important; margin-left: auto !important; margin-right: auto !important;
+            max-width: 820px !important; margin-left: auto !important; margin-right: auto !important;
             width: 100% !important; left: 0 !important; right: 0 !important;
         }}
-        [data-testid="stBottom"], [data-testid="stBottom"] > div {{ background: {bg} !important; }}
+        [data-testid="stBottom"], [data-testid="stBottom"] > div {{ background: {C['bg']} !important; }}
         [data-testid="stBottom"] {{ width: 100% !important; display: flex !important; justify-content: center !important; }}
-        [data-testid="stBottom"] > div {{ max-width: 800px !important; margin: 0 auto !important; }}
+        [data-testid="stBottom"] > div {{ max-width: 820px !important; margin: 0 auto !important; }}
 
+        /* Chat input */
         [data-testid="stChatInput"],
         [data-testid="stChatInput"] > div,
         [data-testid="stChatInput"] > div > div {{
-            background: #ffffff !important;
-            background-color: #ffffff !important;
+            background: #ffffff !important; background-color: #ffffff !important;
         }}
         [data-testid="stChatInput"] {{
-            border-radius: 14px !important;
-            border: 1px solid #a855f7 !important;
-            box-shadow: 0 4px 16px rgba(108, 62, 245, 0.15) !important;
+            border-radius: 16px !important;
+            border: 1.5px solid {C['bbd']} !important;
+            box-shadow: 0 4px 20px rgba(108, 62, 245, 0.08) !important;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
         }}
-        [data-testid="stChatInput"] textarea {{
-            background: #ffffff !important;
-            background-color: #ffffff !important;
-            color: #0d0d0d !important;
-            -webkit-text-fill-color: #0d0d0d !important;
-            caret-color: #6c3ef5 !important;
-        }}
-        [data-testid="stChatInput"] textarea::placeholder {{
-            color: #6b7280 !important;
-            -webkit-text-fill-color: #6b7280 !important;
-        }}
-        [data-testid="stChatInput"] input {{
-            background: #ffffff !important;
-            color: #0d0d0d !important;
-            -webkit-text-fill-color: #0d0d0d !important;
-        }}
-
-        h1, h2, h3, h4, h5, h6 {{ color: {txt} !important; }}
-        h1 {{ font-size: {fs_h1} !important; font-weight: 800 !important; letter-spacing: -0.03em !important; }}
-        p, li, label, .stMarkdown {{ font-size: {fs_base}; line-height: 1.65; color: {txt} !important; }}
-
-        .tool-header {{
-            display: flex; align-items: center; gap: 14px; margin-bottom: 6px;
-            padding-bottom: 16px; border-bottom: 1px solid {bsoft};
-        }}
-        .tool-header .icon {{
-            width: 44px; height: 44px; border-radius: 12px;
-            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-        }}
-        .tool-header .icon svg {{ width: 22px; height: 22px; }}
-        .tool-header .title-block h1 {{ margin: 0 !important; font-size: {fs_tool} !important; }}
-        .tool-header .title-block p {{ margin: 2px 0 0 0 !important; color: {tsoft} !important; font-size: 13px !important; }}
-
-        .theme-chat .icon {{ background: linear-gradient(135deg, #eef2ff, #e0e7ff); }}
-        .theme-cv .icon {{ background: linear-gradient(135deg, #dbeafe, #bfdbfe); }}
-        .theme-pass .icon {{ background: linear-gradient(135deg, #d1fae5, #a7f3d0); }}
-        .theme-video .icon {{ background: linear-gradient(135deg, #ffedd5, #fed7aa); }}
-        .theme-tts .icon {{ background: linear-gradient(135deg, #fce7f3, #fbcfe8); }}
-        .theme-photo .icon {{ background: linear-gradient(135deg, #ede9fe, #ddd6fe); }}
-
-        .stButton > button {{
-            background: {bbtn}; color: {txt}; border: 1px solid {bbd};
-            border-radius: 10px; padding: 8px 16px; font-weight: 600; font-size: 13px;
-            transition: all 0.15s ease;
-        }}
-        .stButton > button:hover {{
-            background: {bhv}; border-color: #a855f7; color: #6c3ef5;
+        [data-testid="stChatInput"]:focus-within {{
+            border-color: {C['accent']} !important;
+            box-shadow: 0 6px 28px rgba(108, 62, 245, 0.18) !important;
             transform: translateY(-1px);
         }}
+        [data-testid="stChatInput"] textarea {{
+            background: #ffffff !important; background-color: #ffffff !important;
+            color: #0d0d0d !important; -webkit-text-fill-color: #0d0d0d !important;
+            caret-color: #6c3ef5 !important;
+            font-size: 15px !important; padding: 4px 6px !important;
+        }}
+        [data-testid="stChatInput"] textarea::placeholder {{
+            color: #9a9aa8 !important; -webkit-text-fill-color: #9a9aa8 !important;
+        }}
+        [data-testid="stChatInput"] input {{
+            background: #ffffff !important; color: #0d0d0d !important;
+            -webkit-text-fill-color: #0d0d0d !important;
+        }}
+
+        /* ---------- TYPOGRAPHY ---------- */
+        h1, h2, h3, h4, h5, h6 {{ color: {C['txt']} !important; }}
+        h1 {{ font-size: {fs_h1} !important; font-weight: 800 !important; letter-spacing: -0.035em !important; }}
+        h2 {{ font-weight: 700 !important; letter-spacing: -0.02em !important; }}
+        p, li, label, .stMarkdown {{ font-size: {fs_base}; line-height: 1.7; color: {C['txt']} !important; }}
+
+        .tool-header {{
+            display: flex; align-items: center; gap: 16px; margin-bottom: 8px;
+            padding-bottom: 20px; border-bottom: 1px solid {C['bsoft']};
+        }}
+        .tool-header .icon {{
+            width: 48px; height: 48px; border-radius: 14px;
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+            transition: transform 0.2s ease;
+        }}
+        .tool-header:hover .icon {{ transform: scale(1.06) rotate(-3deg); }}
+        .tool-header .icon svg {{ width: 24px; height: 24px; }}
+        .tool-header .title-block h1 {{ margin: 0 !important; font-size: {fs_tool} !important; }}
+        .tool-header .title-block p {{ margin: 3px 0 0 0 !important; color: {C['tsoft']} !important; font-size: 13.5px !important; }}
+
+        .theme-chat .icon {{ background: linear-gradient(135deg, #eef2ff, #e0e7ff); box-shadow: 0 4px 14px rgba(99, 102, 241, 0.15); }}
+        .theme-cv .icon {{ background: linear-gradient(135deg, #dbeafe, #bfdbfe); box-shadow: 0 4px 14px rgba(59, 130, 246, 0.15); }}
+        .theme-pass .icon {{ background: linear-gradient(135deg, #d1fae5, #a7f3d0); box-shadow: 0 4px 14px rgba(16, 185, 129, 0.15); }}
+        .theme-video .icon {{ background: linear-gradient(135deg, #ffedd5, #fed7aa); box-shadow: 0 4px 14px rgba(249, 115, 22, 0.15); }}
+        .theme-tts .icon {{ background: linear-gradient(135deg, #fce7f3, #fbcfe8); box-shadow: 0 4px 14px rgba(236, 72, 153, 0.15); }}
+        .theme-photo .icon {{ background: linear-gradient(135deg, #ede9fe, #ddd6fe); box-shadow: 0 4px 14px rgba(139, 92, 246, 0.15); }}
+
+        /* ---------- BUTTONS ---------- */
+        .stButton > button {{
+            background: {C['bbtn']}; color: {C['txt']};
+            border: 1.5px solid {C['bbd']}; border-radius: 11px;
+            padding: 9px 18px; font-weight: 600; font-size: 13.5px;
+            transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+            line-height: 1.2;
+        }}
+        .stButton > button:hover {{
+            background: {C['bhv']}; border-color: {C['accent']}; color: {C['accent']};
+            transform: translateY(-1.5px); box-shadow: 0 6px 16px rgba(108, 62, 245, 0.12);
+        }}
+        .stButton > button:active {{ transform: translateY(0); }}
         .stButton > button[kind="primary"] {{
             background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%);
             color: #ffffff; border: none;
-            box-shadow: 0 4px 14px rgba(108, 62, 245, 0.3);
+            box-shadow: 0 4px 18px rgba(108, 62, 245, 0.35);
+        }}
+        .stButton > button[kind="primary"]:hover {{
+            background: linear-gradient(135deg, #5a2ee0 0%, #9333ea 100%);
+            box-shadow: 0 6px 24px rgba(108, 62, 245, 0.45);
+            color: #ffffff;
         }}
         .stDownloadButton > button {{
-            background: {bbtn}; color: {txt}; border: 1px solid {bbd};
-            border-radius: 10px; padding: 8px 16px; font-weight: 600; font-size: 13px;
+            background: {C['bbtn']}; color: {C['txt']};
+            border: 1.5px solid {C['bbd']}; border-radius: 11px;
+            padding: 9px 18px; font-weight: 600; font-size: 13.5px;
+            transition: all 0.18s ease;
+        }}
+        .stDownloadButton > button:hover {{
+            background: {C['bhv']}; border-color: {C['accent']}; color: {C['accent']};
+            transform: translateY(-1px);
         }}
 
+        /* ---------- INPUTS ---------- */
         .stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox > div > div {{
-            border-radius: 10px !important; border-color: {bbd} !important;
-            font-size: 14px !important; background: {surf} !important; color: {txt} !important;
+            border-radius: 11px !important; border: 1.5px solid {C['bbd']} !important;
+            font-size: 14px !important; background: {C['surf']} !important; color: {C['txt']} !important;
+            transition: all 0.15s ease !important;
+        }}
+        .stTextInput input:focus, .stTextArea textarea:focus, .stNumberInput input:focus {{
+            border-color: {C['accent']} !important;
+            box-shadow: 0 0 0 4px rgba(108, 62, 245, 0.1) !important;
         }}
 
+        /* ---------- FORMS ---------- */
         [data-testid="stForm"] {{
-            border: 1px solid {bsoft}; border-radius: 16px;
-            padding: 22px 24px; background: {surf};
+            border: 1px solid {C['bsoft']}; border-radius: 18px;
+            padding: 24px 26px; background: {C['surf']};
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
         }}
 
+        /* ---------- CHAT MESSAGES ---------- */
         [data-testid="stChatMessage"] {{
-            background: transparent !important; padding: {msg_pad};
-            border-bottom: 1px solid {bsoft}; border-radius: 0;
-            animation: fadeIn 0.3s ease;
+            background: transparent !important;
+            padding: {msg_pad};
+            border-bottom: 1px solid {C['bsoft']};
+            border-radius: 0;
+            animation: msgIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }}
-        @keyframes fadeIn {{
-            from {{ opacity: 0; transform: translateY(6px); }}
+        [data-testid="stChatMessage"]:last-child {{ border-bottom: none; }}
+        @keyframes msgIn {{
+            from {{ opacity: 0; transform: translateY(10px); }}
             to {{ opacity: 1; transform: translateY(0); }}
         }}
 
-        code {{ background: {surf2} !important; color: #a855f7 !important; padding: 3px 8px !important; border-radius: 6px !important; font-weight: 600; }}
-        pre {{ background: #1e1b4b !important; border-radius: 14px !important; }}
-        hr {{ border-color: {bsoft}; }}
+        /* ---------- CODE ---------- */
+        code {{
+            background: {C['surf2']} !important; color: {C['accent']} !important;
+            padding: 3px 9px !important; border-radius: 7px !important;
+            font-weight: 600; font-family: 'JetBrains Mono', monospace !important;
+            font-size: 0.9em;
+        }}
+        pre {{
+            background: #1e1b4b !important; border-radius: 14px !important;
+            padding: 16px 18px !important;
+        }}
+        pre code {{
+            background: transparent !important; color: #e0e7ff !important;
+            padding: 0 !important; font-size: 13px !important;
+        }}
+        hr {{ border-color: {C['bsoft']}; margin: 1.5rem 0; }}
 
+        /* ---------- HERO ---------- */
         .treats-hero {{
             display: flex !important; flex-direction: column !important;
             align-items: center !important; justify-content: center !important;
-            min-height: 55vh !important; text-align: center !important;
+            min-height: 58vh !important; text-align: center !important;
+            animation: heroIn 0.6s ease;
+        }}
+        @keyframes heroIn {{
+            from {{ opacity: 0; transform: scale(0.95); }}
+            to {{ opacity: 1; transform: scale(1); }}
         }}
         .treats-hero .hero-logo {{
             width: 160px !important; height: 160px !important;
-            filter: drop-shadow(0 14px 36px rgba(108, 62, 245, 0.22));
-            animation: float 3s ease-in-out infinite;
+            filter: drop-shadow(0 18px 44px rgba(108, 62, 245, 0.3));
+            animation: float 4s ease-in-out infinite;
         }}
         .treats-hero .greeting {{
-            font-size: 26px; font-weight: 700; letter-spacing: -0.02em;
-            background: linear-gradient(135deg, #1f2937 0%, #6c3ef5 100%);
+            font-size: 28px; font-weight: 700; letter-spacing: -0.03em;
+            background: linear-gradient(135deg, {C['txt']} 0%, {C['accent']} 100%);
             -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-            margin-top: 24px;
+            margin-top: 28px; line-height: 1.3;
         }}
         @keyframes float {{
             0%, 100% {{ transform: translateY(0); }}
-            50% {{ transform: translateY(-8px); }}
+            50% {{ transform: translateY(-10px); }}
         }}
 
-        details {{ border: 1px solid {bsoft}; border-radius: 12px; padding: 4px 14px; background: {surf2}; }}
-        details summary {{ font-weight: 600; font-size: 13px; color: {txt} !important; }}
+        /* ---------- DETAILS ---------- */
+        details {{
+            border: 1px solid {C['bsoft']}; border-radius: 14px;
+            padding: 6px 16px; background: {C['surf2']};
+            transition: all 0.2s ease;
+        }}
+        details:hover {{ border-color: {C['bord']}; }}
+        details summary {{
+            font-weight: 600; font-size: 13.5px; color: {C['txt']} !important;
+            padding: 8px 0;
+        }}
 
+        /* ---------- BADGES ---------- */
         .token-badge {{
-            display: inline-block; padding: 2px 8px; border-radius: 6px;
-            font-size: 10px; font-weight: 600; background: {surf2}; color: {tsoft};
-            margin-right: 6px;
+            display: inline-block; padding: 3px 10px; border-radius: 7px;
+            font-size: 10.5px; font-weight: 600; background: {C['surf2']};
+            color: {C['tsoft']}; margin-right: 6px;
+            font-variant-numeric: tabular-nums;
+            border: 1px solid {C['bsoft']};
         }}
-        .time-badge {{ display: inline-block; font-size: 10px; color: {tmuted}; margin-left: 4px; }}
+        .time-badge {{
+            display: inline-block; font-size: 10.5px; color: {C['tmuted']};
+            margin-left: 4px; font-variant-numeric: tabular-nums;
+        }}
 
-        /* ============================================================
-           POPOVER (☰ Menu)
-           ============================================================ */
+        /* ---------- POPOVER ---------- */
         [data-testid="stPopover"] > button {{
-            background: {bbtn} !important;
-            color: {txt} !important;
-            border: 1px solid {bbd} !important;
-            border-radius: 8px !important;
+            background: {C['bbtn']} !important;
+            color: {C['tsoft']} !important;
+            border: 1.5px solid {C['bbd']} !important;
+            border-radius: 9px !important;
             padding: 4px 12px !important;
-            font-size: 18px !important;
+            font-size: 16px !important;
             font-weight: 700 !important;
             line-height: 1 !important;
-            min-height: 34px !important;
-            height: 34px !important;
+            min-height: 32px !important;
+            height: 32px !important;
             transition: all 0.15s ease !important;
         }}
         [data-testid="stPopover"] > button:hover {{
-            background: {bhv} !important;
-            border-color: #a855f7 !important;
-            color: #6c3ef5 !important;
+            background: {C['bhv']} !important;
+            border-color: {C['accent']} !important;
+            color: {C['accent']} !important;
+            transform: translateY(-1px);
         }}
         [data-testid="stPopoverBody"] {{
-            background: {surf} !important;
-            border: 1px solid {bord} !important;
-            border-radius: 12px !important;
-            padding: 10px !important;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.12) !important;
+            background: {C['surf']} !important;
+            border: 1px solid {C['bord']} !important;
+            border-radius: 14px !important;
+            padding: 8px !important;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15) !important;
         }}
         [data-testid="stPopoverBody"] .stButton > button {{
             width: 100% !important;
             text-align: left !important;
             justify-content: flex-start !important;
             margin-bottom: 4px !important;
+            padding: 8px 14px !important;
+            font-size: 13px !important;
         }}
+        [data-testid="stPopoverBody"] .stButton > button:last-child {{ margin-bottom: 0 !important; }}
 
-        /* ============================================================
-           SIDEBAR TOGGLE
-           ============================================================ */
+        /* ---------- SIDEBAR TOGGLE ---------- */
         @media (min-width: 1024px) {{
             [data-testid="stSidebar"] {{
-                margin-left: 0 !important;
-                transform: none !important;
-                visibility: visible !important;
-                opacity: 1 !important;
-                display: block !important;
-                width: 290px !important;
-                min-width: 290px !important;
-                max-width: 290px !important;
+                margin-left: 0 !important; transform: none !important;
+                visibility: visible !important; opacity: 1 !important; display: block !important;
+                width: 290px !important; min-width: 290px !important; max-width: 290px !important;
                 position: relative !important;
             }}
             [data-testid="stSidebarCollapseButton"],
             [data-testid="stSidebarCollapsedControl"],
             [data-testid="collapsedControl"] {{
-                display: none !important;
-                visibility: hidden !important;
-                opacity: 0 !important;
-                pointer-events: none !important;
+                display: none !important; visibility: hidden !important;
+                opacity: 0 !important; pointer-events: none !important;
             }}
         }}
 
@@ -409,42 +502,37 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
             [data-testid="stSidebarCollapseButton"],
             [data-testid="stSidebarCollapsedControl"],
             [data-testid="collapsedControl"] {{
-                display: flex !important;
-                visibility: visible !important;
-                opacity: 1 !important;
-                position: fixed !important;
-                top: 12px !important;
-                left: 12px !important;
-                width: 44px !important;
-                height: 44px !important;
-                align-items: center !important;
-                justify-content: center !important;
-                background: #6c3ef5 !important;
-                background-color: #6c3ef5 !important;
-                border: none !important;
-                border-radius: 12px !important;
-                padding: 0 !important;
-                margin: 0 !important;
-                box-shadow: 0 4px 16px rgba(108, 62, 245, 0.5) !important;
-                z-index: 2147483647 !important;
-                cursor: pointer !important;
-                transition: all 0.15s ease !important;
+                display: flex !important; visibility: visible !important; opacity: 1 !important;
+                position: fixed !important; top: 12px !important; left: 12px !important;
+                width: 46px !important; height: 46px !important;
+                align-items: center !important; justify-content: center !important;
+                background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%) !important;
+                border: none !important; border-radius: 13px !important;
+                padding: 0 !important; margin: 0 !important;
+                box-shadow: 0 6px 20px rgba(108, 62, 245, 0.5) !important;
+                z-index: 2147483647 !important; cursor: pointer !important;
+                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            }}
+            [data-testid="stSidebarCollapseButton"]:hover,
+            [data-testid="stSidebarCollapsedControl"]:hover,
+            [data-testid="collapsedControl"]:hover {{
+                transform: scale(1.08) !important;
+                box-shadow: 0 8px 28px rgba(108, 62, 245, 0.65) !important;
             }}
             [data-testid="stSidebarCollapseButton"] svg,
             [data-testid="stSidebarCollapsedControl"] svg,
             [data-testid="collapsedControl"] svg {{
-                fill: #ffffff !important;
-                color: #ffffff !important;
-                stroke: #ffffff !important;
-                width: 22px !important;
-                height: 22px !important;
+                fill: #ffffff !important; color: #ffffff !important; stroke: #ffffff !important;
+                width: 22px !important; height: 22px !important;
             }}
         }}
 
         @media (max-width: 768px) {{
-            [data-testid="stSidebar"] {{ min-width: 84vw !important; max-width: 84vw !important; }}
-            .main .block-container {{ padding: 0.75rem !important; }}
+            [data-testid="stSidebar"] {{ min-width: 86vw !important; max-width: 86vw !important; }}
+            section.main > div.block-container {{ padding: 1.25rem 1rem 5rem 1rem !important; }}
             .treats-hero .hero-logo {{ width: 120px !important; height: 120px !important; }}
+            .treats-hero .greeting {{ font-size: 22px; }}
+            .tool-header .icon {{ width: 42px; height: 42px; }}
         }}
     </style>
     """, unsafe_allow_html=True)
@@ -452,7 +540,7 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
 load_css(dark=st.session_state.dark_mode, density=st.session_state.density, font_size=st.session_state.font_size)
 
 # ============================================================
-# JS — sidebar toggle style
+# JS — Sidebar toggle
 # ============================================================
 components.html("""
 <script>
@@ -469,11 +557,11 @@ components.html("""
             'button[kind="headerNoPadding"]',
             'button[kind="header"]'
         ];
-        const STYLE = 'background:#6c3ef5 !important;background-color:#6c3ef5 !important;'+
-            'color:#ffffff !important;border:none !important;border-radius:12px !important;'+
-            'padding:0 !important;margin:0 !important;box-shadow:0 4px 16px rgba(108,62,245,0.5) !important;'+
+        const STYLE = 'background:linear-gradient(135deg,#6c3ef5 0%,#a855f7 100%) !important;'+
+            'color:#fff !important;border:none !important;border-radius:13px !important;'+
+            'padding:0 !important;margin:0 !important;box-shadow:0 6px 20px rgba(108,62,245,0.5) !important;'+
             'z-index:2147483647 !important;position:fixed !important;top:12px !important;left:12px !important;'+
-            'width:44px !important;height:44px !important;display:flex !important;align-items:center !important;'+
+            'width:46px !important;height:46px !important;display:flex !important;align-items:center !important;'+
             'justify-content:center !important;cursor:pointer !important;opacity:1 !important;visibility:visible !important;';
         sels.forEach(function(sel){
             doc.querySelectorAll(sel).forEach(function(el){
@@ -493,7 +581,7 @@ components.html("""
 """, height=0)
 
 # ============================================================
-# JS — auto-scroll to latest message
+# JS — Auto-scroll
 # ============================================================
 components.html("""
 <script>
@@ -501,22 +589,14 @@ components.html("""
     const doc = window.parent.document;
     let lastCount = 0;
     let hasInitialized = false;
-
-    function getMsgCount() {
-        return doc.querySelectorAll('[data-testid="stChatMessage"]').length;
-    }
-
+    function getMsgCount() { return doc.querySelectorAll('[data-testid="stChatMessage"]').length; }
     function scrollToLatest() {
         const messages = doc.querySelectorAll('[data-testid="stChatMessage"]');
         if (messages.length === 0) return;
         const last = messages[messages.length - 1];
-        try {
-            last.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        } catch(e) {
-            last.scrollIntoView();
-        }
+        try { last.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+        catch(e) { last.scrollIntoView(); }
     }
-
     function checkAndScroll() {
         const count = getMsgCount();
         if (!hasInitialized) { lastCount = count; hasInitialized = true; return; }
@@ -527,7 +607,6 @@ components.html("""
         }
         lastCount = count;
     }
-
     try {
         const observer = new MutationObserver(function() { checkAndScroll(); });
         observer.observe(doc.body, { childList: true, subtree: true });
@@ -564,35 +643,21 @@ TITLE_PROMPT = """Generate a short title (3-5 words). Return ONLY the title.
 Message: {message}"""
 
 TOOLS_SCHEMA = [
-    {
-        "type": "function",
-        "function": {
-            "name": "generate_speech",
-            "description": "Convert text to speech in a specific language",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string", "description": "The text to convert to speech"},
-                    "language": {"type": "string", "enum": ["English", "Arabic", "French", "Spanish", "German"]}
-                },
-                "required": ["text", "language"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "generate_image",
-            "description": "Generate an image from a text prompt",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "prompt": {"type": "string", "description": "Description of the image"}
-                },
-                "required": ["prompt"]
-            }
-        }
-    },
+    {"type": "function", "function": {
+        "name": "generate_speech",
+        "description": "Convert text to speech in a specific language",
+        "parameters": {"type": "object", "properties": {
+            "text": {"type": "string", "description": "The text to convert to speech"},
+            "language": {"type": "string", "enum": ["English", "Arabic", "French", "Spanish", "German"]}
+        }, "required": ["text", "language"]}
+    }},
+    {"type": "function", "function": {
+        "name": "generate_image",
+        "description": "Generate an image from a text prompt",
+        "parameters": {"type": "object", "properties": {
+            "prompt": {"type": "string", "description": "Description of the image"}
+        }, "required": ["prompt"]}
+    }},
 ]
 
 # ============================================================
@@ -610,7 +675,6 @@ def trim_history(msgs, max_tokens=MAX_CTX):
     return out
 
 def count_tokens(txt): return max(1, len(txt) // 4) if txt else 0
-def count_words(txt): return len(txt.split()) if txt else 0
 
 def get_greeting():
     h = datetime.now().hour
@@ -742,19 +806,19 @@ def tts_speak(text, language="English", rate_val=1.0, pitch_val=0, vol_val=100):
     return asyncio.run(_tts(text, voice, rate, pitch, vol))
 
 # ============================================================
-# TOOL ICONS
+# ICONS
 # ============================================================
 ICONS = {
-    "chat": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>""",
-    "cv": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>""",
-    "password": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>""",
-    "video": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2.2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>""",
-    "tts": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ec4899" stroke-width="2.2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d='M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07'/></svg>""",
-    "photo": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>""",
+    "chat": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>""",
+    "cv": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>""",
+    "password": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>""",
+    "video": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>""",
+    "tts": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ec4899" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d='M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07'/></svg>""",
+    "photo": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>""",
 }
 
 def tool_header(k, title, sub):
-    st.markdown(f'<div class="tool-header theme-{k}"><div class="icon">{ICONS[k]}</div><div class="title-block"><h1>{title}</h1><p>{sub}</p></div></div><div style="height:24px"></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="tool-header theme-{k}"><div class="icon">{ICONS[k]}</div><div class="title-block"><h1>{title}</h1><p>{sub}</p></div></div><div style="height:26px"></div>', unsafe_allow_html=True)
 
 # ============================================================
 # SIDEBAR
@@ -770,10 +834,10 @@ with st.sidebar:
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1: st.markdown('<div class="sidebar-label" style="padding-top:0;">Display</div>', unsafe_allow_html=True)
     with c2:
-        if st.button("🌙" if not st.session_state.dark_mode else "☀️", key="thm"):
+        if st.button("🌙" if not st.session_state.dark_mode else "☀️", key="thm", help="Toggle theme"):
             st.session_state.dark_mode = not st.session_state.dark_mode; st.rerun()
     with c3:
-        if st.button("⚙️", key="settings"):
+        if st.button("⚙️", key="settings", help="Settings"):
             st.session_state.show_settings = not st.session_state.get("show_settings", False)
 
     if st.session_state.get("show_settings", False):
@@ -799,7 +863,7 @@ with st.sidebar:
 
     if tool == "chat":
         st.markdown('<div class="sidebar-label">Conversations</div>', unsafe_allow_html=True)
-        if st.button("+ New chat", key="nc", use_container_width=True): new_conv(); st.rerun()
+        if st.button("+ New chat", key="nc", use_container_width=True, type="primary"): new_conv(); st.rerun()
         search = st.text_input("search", placeholder="🔍 Search...", label_visibility="collapsed", key="conv_search")
         items = list(st.session_state.conversations.items())
         if search: items = [(c, v) for c, v in items if search.lower() in v["title"].lower()]
@@ -870,7 +934,7 @@ def render_chat():
     msgs = get_msgs()
 
     if not can_send():
-        st.markdown(f'<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:16px 20px;border-radius:12px;margin-bottom:20px;"><strong>Daily limit reached</strong><br>You used {st.session_state.tokens_used:,} / {TOKEN_LIMIT:,} tokens.<br>Resets tomorrow at midnight.</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:18px 22px;border-radius:14px;margin-bottom:24px;"><strong>Daily limit reached</strong><br>You used {st.session_state.tokens_used:,} / {TOKEN_LIMIT:,} tokens.<br>Resets tomorrow at midnight.</div>', unsafe_allow_html=True)
         for m in msgs:
             with st.chat_message(m["role"]): st.markdown(m.get("content",""))
         return
@@ -906,10 +970,9 @@ def render_chat():
                 if tok:
                     st.markdown(f'<span class="token-badge">{tok} tokens</span><span class="time-badge">{ts}</span>', unsafe_allow_html=True)
 
-                # ☰ Popover menu: Copy / Retry / Delete
                 c1, _ = st.columns([1, 8])
                 with c1:
-                    with st.popover("☰", use_container_width=False):
+                    with st.popover("☰"):
                         if st.button("📋 Copy", key=f"cp_{i}", use_container_width=True):
                             copy_to_clipboard(m.get("content",""), f"cp_{i}")
                             st.toast("Copied!")
@@ -942,11 +1005,8 @@ def render_chat():
             hist = trim_history(full)
 
             response = client.chat.completions.create(
-                model=model,
-                messages=hist,
-                temperature=0.7,
-                tools=TOOLS_SCHEMA,
-                tool_choice="auto",
+                model=model, messages=hist, temperature=0.7,
+                tools=TOOLS_SCHEMA, tool_choice="auto",
             )
             msg_obj = response.choices[0].message
 
@@ -957,8 +1017,7 @@ def render_chat():
                     except: args = {}
 
                     if fn == "generate_speech":
-                        text = args.get("text", "")
-                        lang = args.get("language", "English")
+                        text = args.get("text", ""); lang = args.get("language", "English")
                         cost = TOOL_COSTS["tts"]
                         if not can_use_tool(cost):
                             msgs.append({"role":"assistant","content":"⚠️ Not enough tokens for TTS.","ts": datetime.now().isoformat()})
@@ -1139,7 +1198,6 @@ def render_tts():
 # ============================================================
 def render_photo():
     tool_header("photo","Image Generator","Create images from text descriptions")
-    if "gallery" not in st.session_state: st.session_state.gallery = []
     with st.spinner("Loading models..."): models = fetch_img_models()
     pr = st.text_area("Prompt", placeholder="A cat in Paris, cinematic lighting, 4K", height=110)
     c1, c2, c3 = st.columns(3)
