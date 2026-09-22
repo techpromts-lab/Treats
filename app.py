@@ -220,7 +220,6 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
         [data-testid="stBottom"] {{ width: 100% !important; display: flex !important; justify-content: center !important; }}
         [data-testid="stBottom"] > div {{ max-width: 800px !important; margin: 0 auto !important; }}
 
-        /* ✅ FIX: Chat input — white background with dark text ALWAYS */
         [data-testid="stChatInput"],
         [data-testid="stChatInput"] > div,
         [data-testid="stChatInput"] > div > div {{
@@ -346,11 +345,6 @@ def load_css(dark=False, density="comfortable", font_size="medium"):
         }}
         .time-badge {{ display: inline-block; font-size: 10px; color: {tmuted}; margin-left: 4px; }}
 
-        /* ============================================================
-           SIDEBAR TOGGLE BUTTON
-           - Large screens (≥ 1024px): HIDDEN — sidebar stays open
-           - Small/Medium (< 1024px): VISIBLE purple button
-           ============================================================ */
         @media (min-width: 1024px) {{
             [data-testid="stSidebar"] {{
                 margin-left: 0 !important;
@@ -433,7 +427,7 @@ components.html("""
 (function() {
     const doc = window.parent.document;
     function styleToggle() {
-        if (window.parent.innerWidth >= 1024) return; // skip on large screens
+        if (window.parent.innerWidth >= 1024) return;
         const sels = [
             '[data-testid="stSidebarCollapsedControl"]',
             '[data-testid="stSidebarCollapseButton"]',
@@ -462,6 +456,65 @@ components.html("""
     styleToggle();
     setInterval(styleToggle, 500);
     window.parent.addEventListener('resize', styleToggle);
+})();
+</script>
+""", height=0)
+
+# ============================================================
+# JS — Auto-scroll to latest message after sending
+# ============================================================
+components.html("""
+<script>
+(function() {
+    const doc = window.parent.document;
+    let lastCount = 0;
+    let hasInitialized = false;
+
+    function getMsgCount() {
+        return doc.querySelectorAll('[data-testid="stChatMessage"]').length;
+    }
+
+    function scrollToLatest() {
+        const messages = doc.querySelectorAll('[data-testid="stChatMessage"]');
+        if (messages.length === 0) return;
+        const last = messages[messages.length - 1];
+        try {
+            last.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start'
+            });
+        } catch(e) {
+            last.scrollIntoView();
+        }
+    }
+
+    function checkAndScroll() {
+        const count = getMsgCount();
+
+        // On first detection, just record count
+        if (!hasInitialized) {
+            lastCount = count;
+            hasInitialized = true;
+            return;
+        }
+
+        // If new message(s) added, scroll
+        if (count > lastCount) {
+            setTimeout(scrollToLatest, 250);
+            setTimeout(scrollToLatest, 700);
+            setTimeout(scrollToLatest, 1500);
+        }
+        lastCount = count;
+    }
+
+    try {
+        const observer = new MutationObserver(function() {
+            checkAndScroll();
+        });
+        observer.observe(doc.body, { childList: true, subtree: true });
+    } catch(e) {}
+
+    setInterval(checkAndScroll, 700);
 })();
 </script>
 """, height=0)
