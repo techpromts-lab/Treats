@@ -1,68 +1,92 @@
-# Treats
+<div align="center">
 
-Treats is a general-purpose AI assistant built with Python, Streamlit, and Groq.
+<img src="https://raw.githubusercontent.com/techpromts-lab/Treats/main/.streamlit/logo.svg" width="120" alt="Treats Logo" />
 
-## Features
+# 🧠 Treats
 
-- AI chat
-- Conversation history
-- New conversations
-- Multiple AI models
-- English and Arabic conversations
-- Responsive Streamlit interface
-- Error handling
-- API status handling
-- Expandable architecture
-- GitHub-ready project structure
-- Streamlit deployment support
+**A multi-tool AI assistant — chat, vision, voice, and images**
 
-## Technology
+A Streamlit-based AI assistant powered by Groq, with automatic rotation across 10 API keys and a fair daily limit of 5,000 tokens.
 
-- Python
-- Streamlit
-- Groq API
-- GitHub
+[![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)](https://streamlit.io)
+[![Groq](https://img.shields.io/badge/Groq-Powered-F55036?style=flat-square)](https://groq.com)
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
-## Future Development
+</div>
 
-Treats is intentionally structured so future versions can add:
+---
 
-- Long-term memory
-- User accounts
-- Conversation database
-- File uploads
-- PDF analysis
-- Image understanding
-- Web search
-- Tool calling
-- Voice input
-- Voice output
-- Personalization
-- Custom AI agents
-- AI settings
-- Conversation search
-- Conversation folders
-- Export conversations
-- Usage tracking
-- Authentication
-- Multi-user support
-- Admin dashboard
-- Additional AI providers
+## ✨ Features
 
-## Running Locally
+<table>
+<tr>
+<td width="50%">
 
-Install dependencies:
+### 💬 Smart Chat
+- Full image analysis (Vision)
+- LLaMA 4 Scout & Maverick models
+- Real-time streaming responses
+- Full conversation management (create, delete, rename, export as ZIP)
 
-pip install -r requirements.txt
+### 🎨 Image Generation
+- Multiple models (Flux, Turbo, ...)
+- Multiple aspect ratios (1:1, 16:9, 9:16, 4:3)
+- Fixed or random seed
+- Built-in image gallery
 
-Configure the Groq API key using Streamlit Secrets.
+</td>
+<td width="50%">
 
-Run:
+### 🔊 Text to Speech
+- 5 languages supported (Arabic, English, French, Spanish, German)
+- Adjustable rate, pitch, and volume
+- Direct MP3 download
 
-streamlit run app.py
+### 📄 Extra Tools
+- **CV Builder** — professional resumes
+- **Video Script** — storyboards with scene breakdowns
+- **Password Generator** — strong, secure passwords
 
-## Security
+</td>
+</tr>
+</table>
 
-Never commit an API key to GitHub.
+---
 
-Use Streamlit Secrets or environment variables.
+## 🚀 Technical Highlights
+
+| Feature | Description |
+|---|---|
+| 🔄 **Automatic Key Rotation** | Smart switching across 10 Groq keys on quota exhaustion (429) |
+| 📊 **5,000 Daily Tokens** | Transparent counter with automatic midnight reset |
+| 🌙 **Dark Mode** | Instant toggle between Light & Dark themes |
+| ⚙️ **Flexible Settings** | Adjustable display density and font size |
+| 💾 **Conversation Export** | Download all conversations as a ZIP file |
+| 📱 **Responsive** | Works on mobile and desktop |
+
+---
+
+## 🛠️ Tech Stack
+
+<div align="center">
+
+| | Technology | Purpose |
+|:---:|:---:|:---|
+| ![Python](https://img.shields.io/badge/-Python-3776AB?style=flat-square&logo=python&logoColor=white) | **Python 3.11** | Core language |
+| ![Streamlit](https://img.shields.io/badge/-Streamlit-FF4B4B?style=flat-square&logo=streamlit&logoColor=white) | **Streamlit** | Web framework |
+| ![Groq](https://img.shields.io/badge/-Groq-F55036?style=flat-square) | **Groq API** | LLaMA 4 models |
+| ![Edge](https://img.shields.io/badge/-Edge_TTS-0078D4?style=flat-square&logo=microsoftedge&logoColor=white) | **Edge TTS** | Text-to-speech |
+| ![Pollinations](https://img.shields.io/badge/-Pollinations-8B5CF6?style=flat-square) | **Pollinations AI** | Image generation |
+
+</div>
+
+---
+
+## 📦 Local Installation
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/techpromts-lab/Treats.git
+cd Treats
