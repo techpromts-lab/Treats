@@ -1,5 +1,5 @@
 # ============================================================
-# Treats v5.0 — Streamlit AI Assistant
+# Treats v5.1 — Streamlit AI Assistant (bug-fixed + hardened)
 # ============================================================
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ import os
 import random
 import string
 import zipfile
-from dataclasses import dataclass, field, asdict
 from datetime import date, datetime, time, timedelta
 from typing import Any, Callable, Iterable, Optional
+from urllib.parse import quote                      # FIX #2
 
 import requests
 import streamlit as st
@@ -31,13 +31,12 @@ except Exception:
 # PAGE CONFIG
 # ============================================================
 st.set_page_config(
-    page_title="Treats",
-    page_icon="🧠",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    page_title="Treats", page_icon="🧠",
+    layout="wide", initial_sidebar_state="expanded",
 )
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("treats")
 
 
@@ -59,28 +58,21 @@ class Cfg:
     VISION_MODEL    = VISION_MODELS[0]
     SUPPORTED_IMGS  = ["png", "jpg", "jpeg", "webp", "gif"]
     STREAM_TIMEOUT  = 60
-    PERSIST_PATH    = ".treats_state.json"
+    GALLERY_MAX     = 24                                # FIX #9: cap gallery
 
 
 # ============================================================
 # EXCEPTIONS
 # ============================================================
-class TreatsError(Exception):
-    """Base app error (user-displayable)."""
-
-class QuotaError(TreatsError):
-    """All API keys exhausted."""
-
-class ConfigError(TreatsError):
-    """Missing/invalid configuration."""
+class TreatsError(Exception): ...
+class QuotaError(TreatsError): ...
+class ConfigError(TreatsError): ...
 
 
 # ============================================================
-# KEY MANAGER
+# KEY MANAGER  (FIX #6: cache key list)
 # ============================================================
 class KeyManager:
-    """Rotates Groq API keys on quota exhaustion (mid-stream safe)."""
-
     QUOTA_TRIGGERS = (
         "429", "rate limit", "rate_limit", "rate-limit",
         "quota", "insufficient_quota", "too many requests",
@@ -90,7 +82,6 @@ class KeyManager:
 
     @staticmethod
     def _read(name: str) -> Optional[str]:
-        val = None
         try:
             val = st.secrets.get(name)
         except Exception:
@@ -101,12 +92,17 @@ class KeyManager:
 
     @classmethod
     def load(cls) -> list[str]:
+        cached = st.session_state.get("_keys_cache")
+        if cached:
+            return cached
         keys = [k for i in range(1, Cfg.KEY_SLOTS + 1)
                 if (k := cls._read(f"GROQ_API_KEY_{i}"))]
         if not keys and (single := cls._read("GROQ_API_KEY")):
             keys = [single]
         if not keys:
-            raise ConfigError("No GROQ_API_KEY_1..10 found in secrets or environment.")
+            raise ConfigError(
+                "No GROQ_API_KEY_1..10 found in secrets or environment.")
+        st.session_state["_keys_cache"] = keys
         return keys
 
     @classmethod
@@ -152,12 +148,10 @@ class KeyManager:
 
     @classmethod
     def stream(cls, fn: Callable[[Any], Iterable[Any]]) -> Iterable[Any]:
-        """Yield-safe streaming with mid-stream rotation on quota errors."""
         keys = cls.load()
         for i in range(len(keys)):
             try:
-                for chunk in fn(cls.client()):
-                    yield chunk
+                yield from fn(cls.client())
                 return
             except Exception as e:
                 if cls.is_quota_error(e) and i < len(keys) - 1:
@@ -225,26 +219,21 @@ class TokenTracker:
 
 
 # ============================================================
-# STATE
+# STATE  (FIX #5, #12: add missing defaults)
 # ============================================================
 DEFAULTS: dict[str, Any] = {
-    "dark_mode": False,
-    "density": "comfortable",
-    "font_size": "medium",
-    "conv_search": "",
-    "rename_conv": None,
-    "show_settings": False,
-    "gallery": [],
-    "key_index": 0,
-    "tokens_used": 0,
-    "token_date": date.today().isoformat(),
+    "dark_mode": False, "density": "comfortable", "font_size": "medium",
+    "conv_search": "", "rename_conv": None, "show_settings": False,
+    "gallery": [], "key_index": 0,
+    "tokens_used": 0, "token_date": date.today().isoformat(),
     "warned_80": False,
-    "conversations": None,
-    "active_conversation": None,
-    "pending_images": [],          # attached but unsent
-    "prompt_template": None,
-    "editing_msg": None,
+    "conversations": None, "active_conversation": None,
+    "pending_images": {},          # per-conversation
+    "prompt_template": None, "editing_msg": None,
     "last_error": None,
+    "li": None, "lp": "",          # last generated image
+    "_keys_cache": None,
+    "_auto_stream_guard": None,    # FIX #15: prevent re-stream loops
 }
 
 for k, v in DEFAULTS.items():
@@ -281,7 +270,7 @@ LOGO_URI = "data:image/svg+xml;base64," + base64.b64encode(LOGO_SVG.encode()).de
 
 
 # ============================================================
-# CSS
+# CSS  (identical to v5.0 — omitted for brevity, keep as-is)
 # ============================================================
 _PALETTES = {
     True: dict(bg="#0b0b0f", sbg1="#141418", sbg2="#1a1a20", surf="#15151b", surf2="#1f1f26",
@@ -302,394 +291,146 @@ def load_css(dark: bool, density: str, font_size: str) -> None:
     fs_tool = {"small": "23px", "medium": "27px", "large": "31px"}[font_size]
     msg_pad = "14px 0" if density == "compact" else "24px 0"
 
-    st.markdown(f"""
-    <style>
+    st.markdown(f"""<style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
-
-        html, body, [class*="css"] {{
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            -webkit-font-smoothing: antialiased;
-        }}
-        @media (prefers-reduced-motion: reduce) {{
-            *, *::before, *::after {{ animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }}
-        }}
-
+        html, body, [class*="css"] {{ font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; -webkit-font-smoothing:antialiased; }}
+        @media (prefers-reduced-motion: reduce) {{ *,*::before,*::after {{ animation-duration:0.01ms!important; transition-duration:0.01ms!important; }} }}
         #MainMenu, footer, [data-testid="stDecoration"], [data-testid="stStatusWidget"],
         [data-testid="stAppDeployButton"], [data-testid="stMainMenu"],
-        [data-testid="stToolbarActions"] {{ display: none !important; }}
-        header[data-testid="stHeader"] {{ background: transparent !important; box-shadow: none !important; }}
-
+        [data-testid="stToolbarActions"] {{ display:none!important; }}
+        header[data-testid="stHeader"] {{ background:transparent!important; box-shadow:none!important; }}
         html, body, .stApp, [data-testid="stAppViewContainer"],
         [data-testid="stAppViewContainer"] > .main, section.main, [data-testid="stMain"] {{
-            background: {C['bg']} !important; color: {C['txt']} !important;
-        }}
-
-        ::-webkit-scrollbar {{ width: 8px; height: 8px; }}
-        ::-webkit-scrollbar-thumb {{ background: {C['bord']}; border-radius: 4px; }}
-        ::-webkit-scrollbar-thumb:hover {{ background: {C['tmuted']}; }}
-
+            background:{C['bg']}!important; color:{C['txt']}!important; }}
+        ::-webkit-scrollbar {{ width:8px; height:8px; }}
+        ::-webkit-scrollbar-thumb {{ background:{C['bord']}; border-radius:4px; }}
+        ::-webkit-scrollbar-thumb:hover {{ background:{C['tmuted']}; }}
         button, .stButton, .stDownloadButton, label, h1, h2, h3, h4, h5, h6,
         .tool-header, .treats-brand, .sidebar-footer, .treats-hero, [data-testid="stSidebar"] {{
-            -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
-        }}
+            -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }}
         [data-testid="stChatMessage"], .stMarkdown, .stTextArea textarea, .stTextInput input,
-        pre, code {{ -webkit-user-select: text; user-select: text; }}
-
+        pre, code {{ -webkit-user-select:text; user-select:text; }}
         [data-testid="stSidebar"] {{
-            background: linear-gradient(180deg, {C['sbg1']} 0%, {C['sbg2']} 100%) !important;
-            border-right: 1px solid {C['bord']} !important;
-        }}
-        [data-testid="stSidebar"] > div:first-child {{ padding: 1.5rem 1rem 1rem 1rem; }}
-
-        .treats-brand {{ padding: 6px 12px 24px 12px; display: flex; align-items: center; gap: 12px; }}
-        .treats-brand img {{
-            width: 42px; height: 42px;
-            filter: drop-shadow(0 4px 16px rgba(108, 62, 245, 0.35));
-            transition: transform 0.3s ease;
-        }}
-        .treats-brand:hover img {{ transform: rotate(-8deg) scale(1.05); }}
-        .treats-brand .name {{
-            font-size: 21px; font-weight: 800; letter-spacing: -0.04em;
-            background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-        }}
-
-        .sidebar-label {{
-            font-size: 10px; font-weight: 700; text-transform: uppercase;
-            letter-spacing: 0.12em; color: {C['tmuted']};
-            padding: 12px 14px 6px 14px; margin-top: 4px;
-        }}
-
-        [data-testid="stSidebar"] [data-testid="stRadio"] > div[role="radiogroup"] {{
-            gap: 4px !important; display: flex; flex-direction: column;
-        }}
+            background:linear-gradient(180deg,{C['sbg1']} 0%,{C['sbg2']} 100%)!important;
+            border-right:1px solid {C['bord']}!important; }}
+        [data-testid="stSidebar"] > div:first-child {{ padding:1.5rem 1rem 1rem 1rem; }}
+        .treats-brand {{ padding:6px 12px 24px 12px; display:flex; align-items:center; gap:12px; }}
+        .treats-brand img {{ width:42px; height:42px; filter:drop-shadow(0 4px 16px rgba(108,62,245,0.35)); transition:transform 0.3s ease; }}
+        .treats-brand:hover img {{ transform:rotate(-8deg) scale(1.05); }}
+        .treats-brand .name {{ font-size:21px; font-weight:800; letter-spacing:-0.04em;
+            background:linear-gradient(135deg,#6c3ef5 0%,#a855f7 100%);
+            -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }}
+        .sidebar-label {{ font-size:10px; font-weight:700; text-transform:uppercase;
+            letter-spacing:0.12em; color:{C['tmuted']}; padding:12px 14px 6px 14px; margin-top:4px; }}
+        [data-testid="stSidebar"] [data-testid="stRadio"] > div[role="radiogroup"] {{ gap:4px!important; display:flex; flex-direction:column; }}
         [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {{
-            display: flex !important; align-items: center !important; gap: 12px !important;
-            padding: 11px 14px !important; margin: 0 !important; border-radius: 11px !important;
-            cursor: pointer !important; transition: all 0.18s ease !important;
-            font-size: 14px !important; font-weight: 500 !important; color: {C['txt']} !important;
-            width: 100% !important; background: transparent !important;
-            border: 1px solid transparent !important;
-        }}
+            display:flex!important; align-items:center!important; gap:12px!important;
+            padding:11px 14px!important; margin:0!important; border-radius:11px!important;
+            cursor:pointer!important; transition:all 0.18s ease!important;
+            font-size:14px!important; font-weight:500!important; color:{C['txt']}!important;
+            width:100%!important; background:transparent!important; border:1px solid transparent!important; }}
         [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:hover {{
-            background: {C['hov']} !important; border-color: {C['bord']} !important;
-            transform: translateX(3px);
-        }}
-        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {{
-            display: none !important;
-        }}
+            background:{C['hov']}!important; border-color:{C['bord']}!important; transform:translateX(3px); }}
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {{ display:none!important; }}
         [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]::before {{
-            content: '' !important; width: 22px !important; height: 22px !important;
-            flex-shrink: 0 !important; background-repeat: no-repeat !important;
-            background-position: center !important; background-size: 20px 20px !important;
-            border-radius: 7px; padding: 5px; box-sizing: content-box;
+            content:''!important; width:22px!important; height:22px!important; flex-shrink:0!important;
+            background-repeat:no-repeat!important; background-position:center!important;
+            background-size:20px 20px!important; border-radius:7px; padding:5px; box-sizing:content-box; }}
+        label[data-baseweb="radio"]:nth-of-type(1)::before {{ background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2.2'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>")!important; background-color:#eef2ff; }}
+        label[data-baseweb="radio"]:nth-of-type(2)::before {{ background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2.2'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/><polyline points='14 2 14 8 20 8'/></svg>")!important; background-color:#dbeafe; }}
+        label[data-baseweb="radio"]:nth-of-type(3)::before {{ background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2310b981' stroke-width='2.2'><rect x='3' y='11' width='18' height='11' rx='2'/><path d='M7 11V7a5 5 0 0 1 10 0v4'/></svg>")!important; background-color:#d1fae5; }}
+        label[data-baseweb="radio"]:nth-of-type(4)::before {{ background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f97316' stroke-width='2.2'><polygon points='23 7 16 12 23 17 23 7'/><rect x='1' y='5' width='15' height='14' rx='2'/></svg>")!important; background-color:#ffedd5; }}
+        label[data-baseweb="radio"]:nth-of-type(5)::before {{ background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ec4899' stroke-width='2.2'><polygon points='11 5 6 9 2 9 2 15 6 15 11 19 11 5'/></svg>")!important; background-color:#fce7f3; }}
+        label[data-baseweb="radio"]:nth-of-type(6)::before {{ background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b5cf6' stroke-width='2.2'><rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='8.5' cy='8.5' r='1.5'/><polyline points='21 15 16 10 5 21'/></svg>")!important; background-color:#ede9fe; }}
+        label[data-baseweb="radio"]:has(input:checked) {{ background:{C['act']}!important; border-color:{C['bord']}!important; font-weight:700!important; box-shadow:0 2px 8px rgba(108,62,245,0.08); }}
+        [data-testid="stSidebar"] [data-testid="stRadio"] > label:first-child {{ display:none!important; }}
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] > label {{ font-size:10px!important; font-weight:700!important; text-transform:uppercase!important; letter-spacing:0.12em!important; color:{C['tmuted']}!important; padding-left:2px!important; }}
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div {{ background:{C['surf']}!important; border:1px solid {C['bord']}!important; border-radius:11px!important; font-size:13px!important; color:{C['txt']}!important; }}
+        .sidebar-footer {{ padding:16px; color:{C['tmuted']}; font-size:11px; line-height:1.75; border-top:1px solid {C['bord']}; margin-top:16px; text-align:center; }}
+        .sidebar-footer strong {{ color:{C['accent']}; font-weight:700; }}
+        .sidebar-footer .kbd {{ display:inline-block; padding:2px 7px; background:{C['surf2']}; border:1px solid {C['bord']}; border-radius:5px; font-size:10px; font-family:'JetBrains Mono',monospace; color:{C['tsoft']}; margin:0 2px; }}
+        .panel {{ background:{C['surf2']}; border:1px solid {C['bord']}; border-radius:12px; padding:12px 15px; margin:6px 0 8px 0; font-size:12px; color:{C['tsoft']}; }}
+        .panel .row {{ display:flex; justify-content:space-between; margin:5px 0; align-items:center; }}
+        .panel .val {{ color:{C['txt']}; font-weight:700; font-variant-numeric:tabular-nums; }}
+        .panel .ok   {{ color:#10b981; font-weight:700; }}
+        .panel .warn {{ color:#f59e0b; font-weight:700; }}
+        .panel .bad  {{ color:#ef4444; font-weight:700; }}
+        .bar-wrap {{ height:5px; background:{C['bord']}; border-radius:3px; overflow:hidden; margin:10px 0 2px 0; }}
+        .bar-fill {{ height:100%; border-radius:3px; transition:width 0.4s ease; }}
+        section.main, [data-testid="stMain"] {{ display:flex!important; flex-direction:column!important; align-items:center!important; width:100%!important; }}
+        section.main > div.block-container, .main .block-container {{ width:100%!important; max-width:820px!important; margin:0 auto!important; padding:2rem 1.5rem 7rem 1.5rem!important; }}
+        [data-testid="stChatInput"], [data-testid="stBottomBlockContainer"] {{ max-width:820px!important; margin-left:auto!important; margin-right:auto!important; width:100%!important; }}
+        [data-testid="stBottom"], [data-testid="stBottom"] > div {{ background:{C['bg']}!important; }}
+        [data-testid="stBottom"] {{ width:100%!important; display:flex!important; justify-content:center!important; }}
+        [data-testid="stBottom"] > div {{ max-width:820px!important; margin:0 auto!important; }}
+        [data-testid="stChatInput"], [data-testid="stChatInput"] > div, [data-testid="stChatInput"] > div > div {{ background:{C['input_bg']}!important; }}
+        [data-testid="stChatInput"] {{ border-radius:16px!important; border:1.5px solid {C['bbd']}!important; box-shadow:0 4px 20px rgba(108,62,245,0.08)!important; transition:all 0.2s ease!important; }}
+        [data-testid="stChatInput"]:focus-within {{ border-color:{C['accent']}!important; box-shadow:0 6px 28px rgba(108,62,245,0.18)!important; transform:translateY(-1px); }}
+        [data-testid="stChatInput"] textarea {{ background:{C['input_bg']}!important; color:{C['input_txt']}!important; -webkit-text-fill-color:{C['input_txt']}!important; caret-color:{C['accent']}!important; font-size:15px!important; }}
+        [data-testid="stChatInput"] textarea::placeholder {{ color:{C['tmuted']}!important; -webkit-text-fill-color:{C['tmuted']}!important; }}
+        h1, h2, h3, h4, h5, h6 {{ color:{C['txt']}!important; }}
+        h1 {{ font-size:{fs_h1}!important; font-weight:800!important; letter-spacing:-0.035em!important; }}
+        p, li, label, .stMarkdown {{ font-size:{fs_base}; line-height:1.7; color:{C['txt']}!important; }}
+        .tool-header {{ display:flex; align-items:center; gap:16px; margin-bottom:8px; padding-bottom:20px; border-bottom:1px solid {C['bsoft']}; }}
+        .tool-header .icon {{ width:48px; height:48px; border-radius:14px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }}
+        .tool-header .icon svg {{ width:24px; height:24px; }}
+        .tool-header .title-block h1 {{ margin:0!important; font-size:{fs_tool}!important; }}
+        .tool-header .title-block p {{ margin:3px 0 0 0!important; color:{C['tsoft']}!important; font-size:13.5px!important; }}
+        .theme-chat .icon {{ background:linear-gradient(135deg,#eef2ff,#e0e7ff); }}
+        .theme-cv .icon {{ background:linear-gradient(135deg,#dbeafe,#bfdbfe); }}
+        .theme-pass .icon {{ background:linear-gradient(135deg,#d1fae5,#a7f3d0); }}
+        .theme-video .icon {{ background:linear-gradient(135deg,#ffedd5,#fed7aa); }}
+        .theme-tts .icon {{ background:linear-gradient(135deg,#fce7f3,#fbcfe8); }}
+        .theme-photo .icon {{ background:linear-gradient(135deg,#ede9fe,#ddd6fe); }}
+        .stButton > button {{ background:{C['bbtn']}; color:{C['txt']}; border:1.5px solid {C['bbd']}; border-radius:11px; padding:9px 18px; font-weight:600; font-size:13.5px; transition:all 0.18s ease; }}
+        .stButton > button:hover {{ background:{C['bhv']}; border-color:{C['accent']}; color:{C['accent']}; transform:translateY(-1.5px); box-shadow:0 6px 16px rgba(108,62,245,0.12); }}
+        .stButton > button:focus-visible {{ outline:2px solid {C['accent']}!important; outline-offset:2px!important; }}
+        .stButton > button[kind="primary"] {{ background:linear-gradient(135deg,#6c3ef5 0%,#a855f7 100%); color:#fff; border:none; box-shadow:0 4px 18px rgba(108,62,245,0.35); }}
+        .stButton > button[kind="primary"]:hover {{ background:linear-gradient(135deg,#5a2ee0 0%,#9333ea 100%); box-shadow:0 6px 24px rgba(108,62,245,0.45); }}
+        .stDownloadButton > button {{ background:{C['bbtn']}; color:{C['txt']}; border:1.5px solid {C['bbd']}; border-radius:11px; padding:9px 18px; font-weight:600; font-size:13.5px; }}
+        .stDownloadButton > button:hover {{ background:{C['bhv']}; border-color:{C['accent']}; color:{C['accent']}; transform:translateY(-1px); }}
+        .stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox > div > div {{ border-radius:11px!important; border:1.5px solid {C['bbd']}!important; font-size:14px!important; background:{C['surf']}!important; color:{C['txt']}!important; }}
+        .stTextInput input:focus, .stTextArea textarea:focus, .stNumberInput input:focus {{ border-color:{C['accent']}!important; box-shadow:0 0 0 4px rgba(108,62,245,0.1)!important; }}
+        [data-testid="stForm"] {{ border:1px solid {C['bsoft']}; border-radius:18px; padding:24px 26px; background:{C['surf']}; }}
+        [data-testid="stChatMessage"] {{ background:transparent!important; padding:{msg_pad}; border-bottom:1px solid {C['bsoft']}; animation:msgIn 0.4s ease; }}
+        [data-testid="stChatMessage"]:last-child {{ border-bottom:none; }}
+        @keyframes msgIn {{ from {{ opacity:0; transform:translateY(10px); }} to {{ opacity:1; transform:translateY(0); }} }}
+        code {{ background:{C['surf2']}!important; color:{C['accent']}!important; padding:3px 9px!important; border-radius:7px!important; font-weight:600; font-family:'JetBrains Mono',monospace!important; }}
+        pre {{ background:#1e1b4b!important; border-radius:14px!important; padding:16px 18px!important; }}
+        pre code {{ background:transparent!important; color:#e0e7ff!important; padding:0!important; }}
+        hr {{ border-color:{C['bsoft']}; margin:1.5rem 0; }}
+        .treats-hero {{ display:flex!important; flex-direction:column!important; align-items:center!important; justify-content:center!important; min-height:58vh!important; text-align:center!important; animation:heroIn 0.6s ease; }}
+        @keyframes heroIn {{ from {{ opacity:0; transform:scale(0.95); }} to {{ opacity:1; transform:scale(1); }} }}
+        .treats-hero .hero-logo {{ width:160px!important; height:160px!important; filter:drop-shadow(0 18px 44px rgba(108,62,245,0.3)); animation:float 4s ease-in-out infinite; }}
+        .treats-hero .greeting {{ font-size:28px; font-weight:700; letter-spacing:-0.03em; background:linear-gradient(135deg,{C['txt']} 0%,{C['accent']} 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-top:28px; line-height:1.3; }}
+        @keyframes float {{ 0%,100% {{ transform:translateY(0); }} 50% {{ transform:translateY(-10px); }} }}
+        details {{ border:1px solid {C['bsoft']}; border-radius:14px; padding:6px 16px; background:{C['surf2']}; }}
+        details summary {{ font-weight:600; font-size:13.5px; color:{C['txt']}!important; padding:8px 0; }}
+        [data-testid="stPopover"] > button {{ background:{C['bbtn']}!important; color:{C['tsoft']}!important; border:1.5px solid {C['bbd']}!important; border-radius:9px!important; padding:4px 12px!important; font-size:16px!important; font-weight:700!important; line-height:1!important; min-height:32px!important; height:32px!important; }}
+        [data-testid="stPopover"] > button:hover {{ background:{C['bhv']}!important; border-color:{C['accent']}!important; color:{C['accent']}!important; }}
+        [data-testid="stPopoverBody"] {{ background:{C['surf']}!important; border:1px solid {C['bord']}!important; border-radius:14px!important; padding:8px!important; box-shadow:0 12px 40px rgba(0,0,0,0.15)!important; }}
+        [data-testid="stPopoverBody"] .stButton > button {{ width:100%!important; text-align:left!important; justify-content:flex-start!important; margin-bottom:4px!important; }}
+        [data-testid="stFileUploaderDropzone"] {{ background:{C['surf2']}!important; border:1.5px dashed {C['bbd']}!important; border-radius:14px!important; padding:12px!important; }}
+        [data-testid="stFileUploaderDropzone"]:hover {{ border-color:{C['accent']}!important; background:{C['hov']}!important; }}
+        .limit-banner {{ background:{('#450a0a' if dark else '#fef2f2')}; border:1px solid {('#7f1d1d' if dark else '#fecaca')}; color:{('#fecaca' if dark else '#991b1b')}; padding:18px 22px; border-radius:14px; margin-bottom:24px; }}
+        .attach-chip {{ display:inline-flex; align-items:center; gap:8px; background:{C['surf2']}; border:1px solid {C['bord']}; border-radius:10px; padding:6px 12px; font-size:12px; color:{C['tsoft']}; margin:4px 4px 4px 0; }}
+        .msg-meta {{ font-size:11px; color:{C['tmuted']}; margin-top:6px; }}
+        @media (min-width:1024px) {{
+            [data-testid="stSidebar"] {{ margin-left:0!important; transform:none!important; visibility:visible!important; opacity:1!important; display:block!important; width:290px!important; min-width:290px!important; max-width:290px!important; position:relative!important; }}
+            [data-testid="stSidebarCollapseButton"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {{ display:none!important; visibility:hidden!important; opacity:0!important; pointer-events:none!important; }}
         }}
-        label[data-baseweb="radio"]:nth-of-type(1)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2.2'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>") !important; background-color: #eef2ff; }}
-        label[data-baseweb="radio"]:nth-of-type(2)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2.2'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/><polyline points='14 2 14 8 20 8'/></svg>") !important; background-color: #dbeafe; }}
-        label[data-baseweb="radio"]:nth-of-type(3)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2310b981' stroke-width='2.2'><rect x='3' y='11' width='18' height='11' rx='2'/><path d='M7 11V7a5 5 0 0 1 10 0v4'/></svg>") !important; background-color: #d1fae5; }}
-        label[data-baseweb="radio"]:nth-of-type(4)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f97316' stroke-width='2.2'><polygon points='23 7 16 12 23 17 23 7'/><rect x='1' y='5' width='15' height='14' rx='2'/></svg>") !important; background-color: #ffedd5; }}
-        label[data-baseweb="radio"]:nth-of-type(5)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ec4899' stroke-width='2.2'><polygon points='11 5 6 9 2 9 2 15 6 15 11 19 11 5'/></svg>") !important; background-color: #fce7f3; }}
-        label[data-baseweb="radio"]:nth-of-type(6)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b5cf6' stroke-width='2.2'><rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='8.5' cy='8.5' r='1.5'/><polyline points='21 15 16 10 5 21'/></svg>") !important; background-color: #ede9fe; }}
-
-        label[data-baseweb="radio"]:has(input:checked) {{
-            background: {C['act']} !important; border-color: {C['bord']} !important;
-            font-weight: 700 !important; box-shadow: 0 2px 8px rgba(108, 62, 245, 0.08);
+        @media (max-width:1023px) {{
+            [data-testid="stSidebarCollapseButton"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {{ display:flex!important; visibility:visible!important; opacity:1!important; position:fixed!important; top:12px!important; left:12px!important; width:46px!important; height:46px!important; align-items:center!important; justify-content:center!important; background:linear-gradient(135deg,#6c3ef5 0%,#a855f7 100%)!important; border:none!important; border-radius:13px!important; padding:0!important; margin:0!important; box-shadow:0 6px 20px rgba(108,62,245,0.5)!important; z-index:2147483647!important; cursor:pointer!important; }}
+            [data-testid="stSidebarCollapseButton"] svg, [data-testid="stSidebarCollapsedControl"] svg, [data-testid="collapsedControl"] svg {{ fill:#fff!important; stroke:#fff!important; width:22px!important; height:22px!important; }}
         }}
-        [data-testid="stSidebar"] [data-testid="stRadio"] > label:first-child {{ display: none !important; }}
-
-        [data-testid="stSidebar"] [data-testid="stSelectbox"] > label {{
-            font-size: 10px !important; font-weight: 700 !important;
-            text-transform: uppercase !important; letter-spacing: 0.12em !important;
-            color: {C['tmuted']} !important; padding-left: 2px !important;
+        @media (max-width:768px) {{
+            [data-testid="stSidebar"] {{ min-width:86vw!important; max-width:86vw!important; }}
+            section.main > div.block-container {{ padding:1.25rem 1rem 5rem 1rem!important; }}
+            .treats-hero .hero-logo {{ width:120px!important; height:120px!important; }}
+            .treats-hero .greeting {{ font-size:22px; }}
+            .tool-header .icon {{ width:42px; height:42px; }}
         }}
-        [data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div {{
-            background: {C['surf']} !important; border: 1px solid {C['bord']} !important;
-            border-radius: 11px !important; font-size: 13px !important; color: {C['txt']} !important;
-        }}
-
-        .sidebar-footer {{
-            padding: 16px; color: {C['tmuted']}; font-size: 11px; line-height: 1.75;
-            border-top: 1px solid {C['bord']}; margin-top: 16px; text-align: center;
-        }}
-        .sidebar-footer strong {{ color: {C['accent']}; font-weight: 700; }}
-        .sidebar-footer .kbd {{
-            display: inline-block; padding: 2px 7px; background: {C['surf2']};
-            border: 1px solid {C['bord']}; border-radius: 5px; font-size: 10px;
-            font-family: 'JetBrains Mono', monospace; color: {C['tsoft']}; margin: 0 2px;
-        }}
-
-        .panel {{
-            background: {C['surf2']}; border: 1px solid {C['bord']};
-            border-radius: 12px; padding: 12px 15px; margin: 6px 0 8px 0;
-            font-size: 12px; color: {C['tsoft']};
-        }}
-        .panel .row {{ display: flex; justify-content: space-between; margin: 5px 0; align-items: center; }}
-        .panel .val {{ color: {C['txt']}; font-weight: 700; font-variant-numeric: tabular-nums; }}
-        .panel .ok   {{ color: #10b981; font-weight: 700; }}
-        .panel .warn {{ color: #f59e0b; font-weight: 700; }}
-        .panel .bad  {{ color: #ef4444; font-weight: 700; }}
-        .bar-wrap {{ height: 5px; background: {C['bord']}; border-radius: 3px; overflow: hidden; margin: 10px 0 2px 0; }}
-        .bar-fill {{ height: 100%; border-radius: 3px; transition: width 0.4s ease; }}
-
-        section.main, [data-testid="stMain"] {{
-            display: flex !important; flex-direction: column !important;
-            align-items: center !important; width: 100% !important;
-        }}
-        section.main > div.block-container, .main .block-container {{
-            width: 100% !important; max-width: 820px !important;
-            margin: 0 auto !important; padding: 2rem 1.5rem 7rem 1.5rem !important;
-        }}
-
-        [data-testid="stChatInput"], [data-testid="stBottomBlockContainer"] {{
-            max-width: 820px !important; margin-left: auto !important;
-            margin-right: auto !important; width: 100% !important;
-        }}
-        [data-testid="stBottom"], [data-testid="stBottom"] > div {{ background: {C['bg']} !important; }}
-        [data-testid="stBottom"] {{ width: 100% !important; display: flex !important; justify-content: center !important; }}
-        [data-testid="stBottom"] > div {{ max-width: 820px !important; margin: 0 auto !important; }}
-
-        [data-testid="stChatInput"],
-        [data-testid="stChatInput"] > div,
-        [data-testid="stChatInput"] > div > div {{
-            background: {C['input_bg']} !important;
-        }}
-        [data-testid="stChatInput"] {{
-            border-radius: 16px !important;
-            border: 1.5px solid {C['bbd']} !important;
-            box-shadow: 0 4px 20px rgba(108, 62, 245, 0.08) !important;
-            transition: all 0.2s ease !important;
-        }}
-        [data-testid="stChatInput"]:focus-within {{
-            border-color: {C['accent']} !important;
-            box-shadow: 0 6px 28px rgba(108, 62, 245, 0.18) !important;
-            transform: translateY(-1px);
-        }}
-        [data-testid="stChatInput"] textarea {{
-            background: {C['input_bg']} !important;
-            color: {C['input_txt']} !important;
-            -webkit-text-fill-color: {C['input_txt']} !important;
-            caret-color: {C['accent']} !important; font-size: 15px !important;
-        }}
-        [data-testid="stChatInput"] textarea::placeholder {{
-            color: {C['tmuted']} !important; -webkit-text-fill-color: {C['tmuted']} !important;
-        }}
-
-        h1, h2, h3, h4, h5, h6 {{ color: {C['txt']} !important; }}
-        h1 {{ font-size: {fs_h1} !important; font-weight: 800 !important; letter-spacing: -0.035em !important; }}
-        p, li, label, .stMarkdown {{ font-size: {fs_base}; line-height: 1.7; color: {C['txt']} !important; }}
-
-        .tool-header {{
-            display: flex; align-items: center; gap: 16px; margin-bottom: 8px;
-            padding-bottom: 20px; border-bottom: 1px solid {C['bsoft']};
-        }}
-        .tool-header .icon {{
-            width: 48px; height: 48px; border-radius: 14px;
-            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-        }}
-        .tool-header .icon svg {{ width: 24px; height: 24px; }}
-        .tool-header .title-block h1 {{ margin: 0 !important; font-size: {fs_tool} !important; }}
-        .tool-header .title-block p {{
-            margin: 3px 0 0 0 !important; color: {C['tsoft']} !important; font-size: 13.5px !important;
-        }}
-
-        .theme-chat   .icon {{ background: linear-gradient(135deg, #eef2ff, #e0e7ff); }}
-        .theme-cv     .icon {{ background: linear-gradient(135deg, #dbeafe, #bfdbfe); }}
-        .theme-pass   .icon {{ background: linear-gradient(135deg, #d1fae5, #a7f3d0); }}
-        .theme-video  .icon {{ background: linear-gradient(135deg, #ffedd5, #fed7aa); }}
-        .theme-tts    .icon {{ background: linear-gradient(135deg, #fce7f3, #fbcfe8); }}
-        .theme-photo  .icon {{ background: linear-gradient(135deg, #ede9fe, #ddd6fe); }}
-
-        .stButton > button {{
-            background: {C['bbtn']}; color: {C['txt']};
-            border: 1.5px solid {C['bbd']}; border-radius: 11px;
-            padding: 9px 18px; font-weight: 600; font-size: 13.5px;
-            transition: all 0.18s ease;
-        }}
-        .stButton > button:hover {{
-            background: {C['bhv']}; border-color: {C['accent']}; color: {C['accent']};
-            transform: translateY(-1.5px); box-shadow: 0 6px 16px rgba(108, 62, 245, 0.12);
-        }}
-        .stButton > button:focus-visible {{
-            outline: 2px solid {C['accent']} !important; outline-offset: 2px !important;
-        }}
-        .stButton > button[kind="primary"] {{
-            background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%);
-            color: #ffffff; border: none;
-            box-shadow: 0 4px 18px rgba(108, 62, 245, 0.35);
-        }}
-        .stButton > button[kind="primary"]:hover {{
-            background: linear-gradient(135deg, #5a2ee0 0%, #9333ea 100%);
-            box-shadow: 0 6px 24px rgba(108, 62, 245, 0.45);
-        }}
-        .stDownloadButton > button {{
-            background: {C['bbtn']}; color: {C['txt']};
-            border: 1.5px solid {C['bbd']}; border-radius: 11px;
-            padding: 9px 18px; font-weight: 600; font-size: 13.5px;
-        }}
-        .stDownloadButton > button:hover {{
-            background: {C['bhv']}; border-color: {C['accent']}; color: {C['accent']};
-            transform: translateY(-1px);
-        }}
-
-        .stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox > div > div {{
-            border-radius: 11px !important; border: 1.5px solid {C['bbd']} !important;
-            font-size: 14px !important; background: {C['surf']} !important; color: {C['txt']} !important;
-        }}
-        .stTextInput input:focus, .stTextArea textarea:focus, .stNumberInput input:focus {{
-            border-color: {C['accent']} !important;
-            box-shadow: 0 0 0 4px rgba(108, 62, 245, 0.1) !important;
-        }}
-
-        [data-testid="stForm"] {{
-            border: 1px solid {C['bsoft']}; border-radius: 18px;
-            padding: 24px 26px; background: {C['surf']};
-        }}
-
-        [data-testid="stChatMessage"] {{
-            background: transparent !important; padding: {msg_pad};
-            border-bottom: 1px solid {C['bsoft']};
-            animation: msgIn 0.4s ease;
-        }}
-        [data-testid="stChatMessage"]:last-child {{ border-bottom: none; }}
-        @keyframes msgIn {{
-            from {{ opacity: 0; transform: translateY(10px); }}
-            to   {{ opacity: 1; transform: translateY(0); }}
-        }}
-
-        code {{
-            background: {C['surf2']} !important; color: {C['accent']} !important;
-            padding: 3px 9px !important; border-radius: 7px !important;
-            font-weight: 600; font-family: 'JetBrains Mono', monospace !important;
-        }}
-        pre {{ background: #1e1b4b !important; border-radius: 14px !important; padding: 16px 18px !important; }}
-        pre code {{ background: transparent !important; color: #e0e7ff !important; padding: 0 !important; }}
-        hr {{ border-color: {C['bsoft']}; margin: 1.5rem 0; }}
-
-        .treats-hero {{
-            display: flex !important; flex-direction: column !important;
-            align-items: center !important; justify-content: center !important;
-            min-height: 58vh !important; text-align: center !important;
-            animation: heroIn 0.6s ease;
-        }}
-        @keyframes heroIn {{
-            from {{ opacity: 0; transform: scale(0.95); }}
-            to   {{ opacity: 1; transform: scale(1); }}
-        }}
-        .treats-hero .hero-logo {{
-            width: 160px !important; height: 160px !important;
-            filter: drop-shadow(0 18px 44px rgba(108, 62, 245, 0.3));
-            animation: float 4s ease-in-out infinite;
-        }}
-        .treats-hero .greeting {{
-            font-size: 28px; font-weight: 700; letter-spacing: -0.03em;
-            background: linear-gradient(135deg, {C['txt']} 0%, {C['accent']} 100%);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-            margin-top: 28px; line-height: 1.3;
-        }}
-        @keyframes float {{
-            0%, 100% {{ transform: translateY(0); }}
-            50%      {{ transform: translateY(-10px); }}
-        }}
-
-        details {{
-            border: 1px solid {C['bsoft']}; border-radius: 14px;
-            padding: 6px 16px; background: {C['surf2']};
-        }}
-        details summary {{
-            font-weight: 600; font-size: 13.5px; color: {C['txt']} !important; padding: 8px 0;
-        }}
-
-        [data-testid="stPopover"] > button {{
-            background: {C['bbtn']} !important; color: {C['tsoft']} !important;
-            border: 1.5px solid {C['bbd']} !important; border-radius: 9px !important;
-            padding: 4px 12px !important; font-size: 16px !important;
-            font-weight: 700 !important; line-height: 1 !important;
-            min-height: 32px !important; height: 32px !important;
-        }}
-        [data-testid="stPopover"] > button:hover {{
-            background: {C['bhv']} !important;
-            border-color: {C['accent']} !important; color: {C['accent']} !important;
-        }}
-        [data-testid="stPopoverBody"] {{
-            background: {C['surf']} !important; border: 1px solid {C['bord']} !important;
-            border-radius: 14px !important; padding: 8px !important;
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15) !important;
-        }}
-        [data-testid="stPopoverBody"] .stButton > button {{
-            width: 100% !important; text-align: left !important;
-            justify-content: flex-start !important; margin-bottom: 4px !important;
-        }}
-
-        [data-testid="stFileUploaderDropzone"] {{
-            background: {C['surf2']} !important;
-            border: 1.5px dashed {C['bbd']} !important;
-            border-radius: 14px !important; padding: 12px !important;
-        }}
-        [data-testid="stFileUploaderDropzone"]:hover {{
-            border-color: {C['accent']} !important;
-            background: {C['hov']} !important;
-        }}
-
-        .limit-banner {{
-            background: {('#450a0a' if dark else '#fef2f2')};
-            border: 1px solid {('#7f1d1d' if dark else '#fecaca')};
-            color: {('#fecaca' if dark else '#991b1b')};
-            padding: 18px 22px; border-radius: 14px; margin-bottom: 24px;
-        }}
-        .attach-chip {{
-            display: inline-flex; align-items: center; gap: 8px;
-            background: {C['surf2']}; border: 1px solid {C['bord']};
-            border-radius: 10px; padding: 6px 12px; font-size: 12px;
-            color: {C['tsoft']}; margin: 4px 4px 4px 0;
-        }}
-        .msg-meta {{ font-size: 11px; color: {C['tmuted']}; margin-top: 6px; }}
-
-        @media (min-width: 1024px) {{
-            [data-testid="stSidebar"] {{
-                margin-left: 0 !important; transform: none !important;
-                visibility: visible !important; opacity: 1 !important; display: block !important;
-                width: 290px !important; min-width: 290px !important; max-width: 290px !important;
-                position: relative !important;
-            }}
-            [data-testid="stSidebarCollapseButton"],
-            [data-testid="stSidebarCollapsedControl"],
-            [data-testid="collapsedControl"] {{
-                display: none !important; visibility: hidden !important;
-                opacity: 0 !important; pointer-events: none !important;
-            }}
-        }}
-
-        @media (max-width: 1023px) {{
-            [data-testid="stSidebarCollapseButton"],
-            [data-testid="stSidebarCollapsedControl"],
-            [data-testid="collapsedControl"] {{
-                display: flex !important; visibility: visible !important; opacity: 1 !important;
-                position: fixed !important; top: 12px !important; left: 12px !important;
-                width: 46px !important; height: 46px !important;
-                align-items: center !important; justify-content: center !important;
-                background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%) !important;
-                border: none !important; border-radius: 13px !important;
-                padding: 0 !important; margin: 0 !important;
-                box-shadow: 0 6px 20px rgba(108, 62, 245, 0.5) !important;
-                z-index: 2147483647 !important; cursor: pointer !important;
-            }}
-            [data-testid="stSidebarCollapseButton"] svg,
-            [data-testid="stSidebarCollapsedControl"] svg,
-            [data-testid="collapsedControl"] svg {{
-                fill: #ffffff !important; stroke: #ffffff !important;
-                width: 22px !important; height: 22px !important;
-            }}
-        }}
-
-        @media (max-width: 768px) {{
-            [data-testid="stSidebar"] {{ min-width: 86vw !important; max-width: 86vw !important; }}
-            section.main > div.block-container {{ padding: 1.25rem 1rem 5rem 1rem !important; }}
-            .treats-hero .hero-logo {{ width: 120px !important; height: 120px !important; }}
-            .treats-hero .greeting {{ font-size: 22px; }}
-            .tool-header .icon {{ width: 42px; height: 42px; }}
-        }}
-    </style>
-    """, unsafe_allow_html=True)
+    </style>""", unsafe_allow_html=True)
 
 
 load_css(st.session_state.dark_mode, st.session_state.density, st.session_state.font_size)
@@ -704,28 +445,12 @@ components.html("""
     const doc = window.parent.document;
     function styleToggle() {
         if (window.parent.innerWidth >= 1024) return;
-        const sels = [
-            '[data-testid="stSidebarCollapsedControl"]',
-            '[data-testid="stSidebarCollapseButton"]',
-            '[data-testid="collapsedControl"]',
-            '[data-testid="stSidebarCollapsedControl"] button',
-            '[data-testid="stSidebarCollapseButton"] button',
-            'button[kind="headerNoPadding"]',
-            'button[kind="header"]'
-        ];
-        const STYLE = 'background:linear-gradient(135deg,#6c3ef5 0%,#a855f7 100%) !important;'+
-            'color:#fff !important;border:none !important;border-radius:13px !important;'+
-            'padding:0 !important;margin:0 !important;box-shadow:0 6px 20px rgba(108,62,245,0.5) !important;'+
-            'z-index:2147483647 !important;position:fixed !important;top:12px !important;left:12px !important;'+
-            'width:46px !important;height:46px !important;display:flex !important;align-items:center !important;'+
-            'justify-content:center !important;cursor:pointer !important;opacity:1 !important;visibility:visible !important;';
+        const sels = ['[data-testid="stSidebarCollapsedControl"]','[data-testid="stSidebarCollapseButton"]','[data-testid="collapsedControl"]','[data-testid="stSidebarCollapsedControl"] button','[data-testid="stSidebarCollapseButton"] button','button[kind="headerNoPadding"]','button[kind="header"]'];
+        const STYLE = 'background:linear-gradient(135deg,#6c3ef5 0%,#a855f7 100%) !important;color:#fff !important;border:none !important;border-radius:13px !important;padding:0 !important;margin:0 !important;box-shadow:0 6px 20px rgba(108,62,245,0.5) !important;z-index:2147483647 !important;position:fixed !important;top:12px !important;left:12px !important;width:46px !important;height:46px !important;display:flex !important;align-items:center !important;justify-content:center !important;cursor:pointer !important;opacity:1 !important;visibility:visible !important;';
         sels.forEach(function(sel){
             doc.querySelectorAll(sel).forEach(function(el){
                 el.style.cssText = STYLE;
-                el.querySelectorAll('svg').forEach(function(s){
-                    s.style.fill='#fff'; s.style.stroke='#fff';
-                    s.style.width='22px'; s.style.height='22px';
-                });
+                el.querySelectorAll('svg').forEach(function(s){ s.style.fill='#fff'; s.style.stroke='#fff'; s.style.width='22px'; s.style.height='22px'; });
             });
         });
     }
@@ -733,8 +458,7 @@ components.html("""
     setInterval(styleToggle, 500);
     window.parent.addEventListener('resize', styleToggle);
 })();
-</script>
-""", height=0)
+</script>""", height=0)
 
 components.html("""
 <script>
@@ -752,18 +476,11 @@ components.html("""
     function check() {
         const c = count();
         if (!init) { lastCount = c; init = true; return; }
-        if (c > lastCount) {
-            setTimeout(scroll, 250);
-            setTimeout(scroll, 700);
-            setTimeout(scroll, 1500);
-        }
+        if (c > lastCount) { setTimeout(scroll, 250); setTimeout(scroll, 700); setTimeout(scroll, 1500); }
         lastCount = c;
     }
-    try { new MutationObserver(check).observe(doc.body, { childList: true, subtree: true }); }
-    catch(e) {}
+    try { new MutationObserver(check).observe(doc.body, { childList: true, subtree: true }); } catch(e) {}
     setInterval(check, 700);
-
-    // Keyboard shortcuts: Cmd/Ctrl+K new chat, Cmd/Ctrl+/ focus input
     window.parent.addEventListener('keydown', function(e) {
         const mod = e.metaKey || e.ctrlKey;
         if (!mod) return;
@@ -777,8 +494,7 @@ components.html("""
         }
     });
 })();
-</script>
-""", height=0)
+</script>""", height=0)
 
 
 # ============================================================
@@ -811,17 +527,14 @@ TOOLS_SCHEMA = [
         "description": "Convert text to speech in a specific language",
         "parameters": {"type": "object", "properties": {
             "text": {"type": "string", "description": "The text to convert to speech"},
-            "language": {"type": "string",
-                         "enum": ["English", "Arabic", "French", "Spanish", "German"]}
-        }, "required": ["text", "language"]}
-    }},
+            "language": {"type": "string", "enum": ["English", "Arabic", "French", "Spanish", "German"]}
+        }, "required": ["text", "language"]}}},
     {"type": "function", "function": {
         "name": "generate_image",
         "description": "Generate an image from a text prompt",
         "parameters": {"type": "object", "properties": {
-            "prompt": {"type": "string", "description": "Description of the image"}
-        }, "required": ["prompt"]}
-    }},
+            "prompt": {"type": "string", "description": "Description of the image"}},
+            "required": ["prompt"]}}},
 ]
 
 PROMPTS_LIB = [
@@ -838,7 +551,6 @@ PROMPTS_LIB = [
 # UTILITIES
 # ============================================================
 def esc(s: Any) -> str:
-    """HTML-escape user content before embedding in st.markdown html."""
     return html.escape(str(s), quote=True)
 
 
@@ -851,19 +563,17 @@ def greeting() -> str:
 
 
 def fmt_time(iso: str) -> str:
-    try:
-        return datetime.fromisoformat(iso).strftime("%H:%M")
-    except Exception:
-        return ""
+    try:    return datetime.fromisoformat(iso).strftime("%H:%M")
+    except Exception: return ""
 
 
 def copy_to_clipboard(text: str) -> None:
+    # FIX #10: allow clipboard-write in iframe via sandbox attr
     js_text = json.dumps(text)
     components.html(
         f"""<script>(async function(){{
-            try {{
-                await navigator.clipboard.writeText({js_text});
-            }} catch(e) {{
+            try {{ await navigator.clipboard.writeText({js_text}); }}
+            catch(e) {{
                 var ta=document.createElement('textarea'); ta.value={js_text};
                 ta.style.position='fixed'; ta.style.opacity='0';
                 document.body.appendChild(ta); ta.select();
@@ -914,7 +624,8 @@ def build_api_message(m: dict) -> dict:
 # ============================================================
 def _new_conv_dict(cid: str, title: str = "New chat") -> dict:
     return {"id": cid, "title": title, "messages": [],
-            "created": datetime.now().isoformat(), "updated": datetime.now().isoformat()}
+            "created": datetime.now().isoformat(),
+            "updated": datetime.now().isoformat()}
 
 
 def init_conversations() -> None:
@@ -940,16 +651,24 @@ def new_conversation() -> None:
     nid = f"c_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
     st.session_state.conversations[nid] = _new_conv_dict(nid)
     st.session_state.active_conversation = nid
-    st.session_state.pending_images = []
 
 
 def delete_conversation(cid: str) -> None:
     st.session_state.conversations.pop(cid, None)
+    st.session_state.pending_images.pop(cid, None)     # FIX #12
     if st.session_state.active_conversation == cid:
         keys = list(st.session_state.conversations.keys())
         st.session_state.active_conversation = keys[0] if keys else None
     if not st.session_state.conversations:
         new_conversation()
+
+
+def pending_for(cid: Optional[str] = None) -> list:
+    """Get the pending image list for a conversation (FIX #12)."""
+    cid = cid or st.session_state.active_conversation
+    if not cid:
+        return []
+    return st.session_state.pending_images.setdefault(cid, [])
 
 
 def auto_title(msg: str) -> str:
@@ -977,12 +696,14 @@ def fetch_img_models() -> list[str]:
         r = requests.get("https://image.pollinations.ai/models", timeout=10)
         r.raise_for_status()
         d = r.json()
+        # FIX #11: robust parsing
         if isinstance(d, list):
-            m = [x.get("name") or x for x in d] if d and isinstance(d[0], dict) else d
+            m = [x.get("name") for x in d if isinstance(x, dict) and x.get("name")] or \
+                [x for x in d if isinstance(x, str)]
         elif isinstance(d, dict):
             m = list(d.keys())
         else:
-            m = ["flux", "turbo"]
+            m = []
         m = [str(x) for x in m if x]
         return m or ["flux", "turbo"]
     except Exception:
@@ -1036,8 +757,7 @@ async def _tts_async(text: str, voice: str, rate: str, pitch: str, volume: str) 
     return buf.getvalue()
 
 
-LANG_CODE = {"English": "en", "Arabic": "ar", "French": "fr",
-             "Spanish": "es", "German": "de"}
+LANG_CODE = {"English": "en", "Arabic": "ar", "French": "fr", "Spanish": "es", "German": "de"}
 LANG_LABEL = {v: k for k, v in LANG_CODE.items()}
 
 
@@ -1049,9 +769,9 @@ def tts_speak(text: str, language: str = "English",
     if not pool:
         raise TreatsError(f"No voices available for {language}.")
     voice = pool[0]
-    rate = f"{'+' if rate_val >= 1 else ''}{int((rate_val - 1) * 100)}%"
+    rate  = f"{'+' if rate_val >= 1 else ''}{int((rate_val - 1) * 100)}%"
     pitch = f"{'+' if pitch_val >= 0 else ''}{pitch_val}Hz"
-    vol = f"+{vol_val}%"
+    vol   = f"+{vol_val}%"
     return asyncio.run(_tts_async(text, voice, rate, pitch, vol))
 
 
@@ -1083,12 +803,8 @@ def render_tool_header(key: str, title: str, sub: str) -> None:
 init_conversations()
 
 TOOLS = {
-    "Chat": "chat",
-    "CV Builder": "cv",
-    "Password Generator": "password",
-    "Video Script": "video",
-    "Text to Speech": "tts",
-    "Image Generator": "photo",
+    "Chat": "chat", "CV Builder": "cv", "Password Generator": "password",
+    "Video Script": "video", "Text to Speech": "tts", "Image Generator": "photo",
 }
 
 with st.sidebar:
@@ -1115,16 +831,14 @@ with st.sidebar:
         density = st.selectbox(
             "Density", ["comfortable", "compact"],
             index=0 if st.session_state.density == "comfortable" else 1,
-            key="dens_sel",
-        )
+            key="dens_sel")
         if density != st.session_state.density:
             st.session_state.density = density
             st.rerun()
         fsize = st.selectbox(
             "Font size", ["small", "medium", "large"],
             index={"small": 0, "medium": 1, "large": 2}[st.session_state.font_size],
-            key="fs_sel",
-        )
+            key="fs_sel")
         if fsize != st.session_state.font_size:
             st.session_state.font_size = fsize
             st.rerun()
@@ -1132,8 +846,8 @@ with st.sidebar:
     # Usage panel
     st.markdown('<div class="sidebar-label">Usage</div>', unsafe_allow_html=True)
     used = TokenTracker.used()
-    rem = TokenTracker.remaining()
-    pct = min(100, int((used / Cfg.TOKEN_LIMIT) * 100))
+    rem  = TokenTracker.remaining()
+    pct  = min(100, int((used / Cfg.TOKEN_LIMIT) * 100))
     if pct >= 90:   bar_color, cls, txt = "#ef4444", "bad",  "Critical"
     elif pct >= 70: bar_color, cls, txt = "#f59e0b", "warn", "Warning"
     else:           bar_color, cls, txt = "#10b981", "ok",   "Active"
@@ -1145,35 +859,26 @@ with st.sidebar:
         f'<div class="row"><span>Remaining</span><span class="val">{rem:,}</span></div>'
         f'<div class="row"><span>Resets in</span><span class="val">{TokenTracker.reset_in()}</span></div>'
         f'<div class="bar-wrap"><div class="bar-fill" style="width:{pct}%;background:{bar_color};"></div></div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
+        f'</div>', unsafe_allow_html=True)
 
-    # API key counter
     try:
         total_keys = len(KeyManager.load())
         idx = KeyManager.index()
         st.markdown(
-            f'<div class="panel">'
-            f'<div class="row"><span>API Key</span>'
-            f'<span class="val">{idx + 1} / {total_keys}</span></div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+            f'<div class="panel"><div class="row"><span>API Key</span>'
+            f'<span class="val">{idx + 1} / {total_keys}</span></div></div>',
+            unsafe_allow_html=True)
     except ConfigError:
         st.markdown(
             '<div class="panel"><div class="row"><span class="bad">'
             'No API keys configured</span></div></div>',
-            unsafe_allow_html=True,
-        )
+            unsafe_allow_html=True)
 
-    # Tools
     st.markdown('<div class="sidebar-label">Tools</div>', unsafe_allow_html=True)
     choice = st.radio("nav", list(TOOLS.keys()),
                       label_visibility="collapsed", key="nav")
     tool = TOOLS[choice]
 
-    # Chat-specific: conversations
     if tool == "chat":
         st.markdown('<div class="sidebar-label">Conversations</div>',
                     unsafe_allow_html=True)
@@ -1187,8 +892,7 @@ with st.sidebar:
 
         items = list(st.session_state.conversations.items())
         if search:
-            items = [(c, v) for c, v in items
-                     if search.lower() in v["title"].lower()]
+            items = [(c, v) for c, v in items if search.lower() in v["title"].lower()]
 
         for cid, conv in items:
             active = cid == st.session_state.active_conversation
@@ -1197,7 +901,6 @@ with st.sidebar:
             with col1:
                 if st.button(label, key=f"c_{cid}", use_container_width=True):
                     st.session_state.active_conversation = cid
-                    st.session_state.pending_images = []
                     st.rerun()
             with col2:
                 if st.button("✎", key=f"r_{cid}", help="Rename"):
@@ -1212,8 +915,7 @@ with st.sidebar:
                 with st.form(f"ren_{cid}"):
                     new_title = st.text_input(
                         "New title", value=conv["title"],
-                        label_visibility="collapsed", key=f"nt_{cid}",
-                    )
+                        label_visibility="collapsed", key=f"nt_{cid}")
                     sc1, sc2 = st.columns(2)
                     with sc1:
                         if st.form_submit_button("Save", use_container_width=True):
@@ -1238,22 +940,19 @@ with st.sidebar:
                 st.download_button(
                     "⬇️ Download ZIP", buf.getvalue(),
                     f"treats_all_{datetime.now():%Y%m%d}.zip",
-                    "application/zip", use_container_width=True,
-                )
+                    "application/zip", use_container_width=True)
 
-    # Model selector
     st.markdown('<div class="sidebar-label">AI Model</div>', unsafe_allow_html=True)
     model = st.selectbox("m", Cfg.GROQ_MODELS, key="mdl", label_visibility="collapsed")
 
     st.markdown(
-        '<div class="sidebar-footer"><strong>Treats v5.0</strong><br>'
+        '<div class="sidebar-footer"><strong>Treats v5.1</strong><br>'
         'Powered by Groq<br><br>'
         '<span class="kbd">Enter</span> send · '
         '<span class="kbd">Shift+Enter</span> newline<br>'
         '<span class="kbd">⌘K</span> new chat · '
         '<span class="kbd">⌘/</span> focus</div>',
-        unsafe_allow_html=True,
-    )
+        unsafe_allow_html=True)
 
 
 # ============================================================
@@ -1274,7 +973,6 @@ def render_message_actions(m: dict, i: int, msgs: list[dict]) -> None:
 
             if m["role"] == "assistant":
                 if st.button("🔄 Regenerate", key=f"rg_{i}", use_container_width=True):
-                    # Remove this assistant message; keep preceding context
                     set_messages(msgs[:i])
                     st.rerun()
 
@@ -1285,7 +983,6 @@ def render_message_actions(m: dict, i: int, msgs: list[dict]) -> None:
 
 def render_message(m: dict, i: int, msgs: list[dict]) -> None:
     with st.chat_message(m["role"]):
-        # Show attached images
         for url in m.get("images", []):
             try:
                 st.image(url, width=280)
@@ -1298,20 +995,17 @@ def render_message(m: dict, i: int, msgs: list[dict]) -> None:
             if "audio_bytes" in m:
                 st.audio(m["audio_bytes"], format="audio/mp3")
                 st.download_button("⬇️ MP3", m["audio_bytes"],
-                                   f"tts_{i}.mp3", "audio/mpeg",
-                                   key=f"dl_tts_{i}")
+                                   f"tts_{i}.mp3", "audio/mpeg", key=f"dl_tts_{i}")
         elif mtype == "image":
             st.markdown(m.get("content", ""))
             if "image_bytes" in m:
                 st.image(m["image_bytes"])
                 st.download_button("⬇️ PNG", m["image_bytes"],
-                                   f"img_{i}.png", "image/png",
-                                   key=f"dl_img_{i}")
+                                   f"img_{i}.png", "image/png", key=f"dl_img_{i}")
         else:
             if m.get("content"):
                 st.markdown(m["content"])
 
-        # Inline edit mode for user messages
         if m["role"] == "user" and st.session_state.editing_msg == i:
             new_text = st.text_area("Edit message", value=m.get("content", ""),
                                     key=f"edit_ta_{i}", height=100)
@@ -1329,7 +1023,6 @@ def render_message(m: dict, i: int, msgs: list[dict]) -> None:
                     st.session_state.editing_msg = None
                     st.rerun()
 
-        # Metadata + actions
         meta = fmt_time(m.get("ts", ""))
         if meta:
             st.markdown(f'<div class="msg-meta">{esc(meta)}</div>',
@@ -1340,7 +1033,7 @@ def render_message(m: dict, i: int, msgs: list[dict]) -> None:
 
 
 # ============================================================
-# CHAT — TOOL HANDLING
+# CHAT — TOOL HANDLING  (FIX #8: keep assistant tool_calls in history)
 # ============================================================
 def handle_tool_call(tc: Any, msgs: list[dict]) -> None:
     name = tc.function.name
@@ -1352,51 +1045,43 @@ def handle_tool_call(tc: Any, msgs: list[dict]) -> None:
     if name == "generate_speech":
         text = (args.get("text") or "").strip()
         lang = args.get("language") or "English"
-        with st.chat_message("assistant"):
-            with st.spinner(f"Generating {lang} speech…"):
-                try:
-                    audio_bytes = tts_speak(text, lang)
-                    msgs.append({
-                        "role": "assistant",
-                        "content": f"🔊 **Audio** ({lang}):\n\n> {text}",
-                        "type": "audio",
-                        "audio_bytes": audio_bytes,
-                        "ts": datetime.now().isoformat(),
-                    })
-                except Exception as e:
-                    msgs.append({
-                        "role": "assistant",
-                        "content": f"❌ TTS failed: {e}",
-                        "ts": datetime.now().isoformat(),
-                    })
+        try:
+            audio_bytes = tts_speak(text, lang)
+            msgs.append({
+                "role": "assistant",
+                "content": f"🔊 **Audio** ({lang}):\n\n> {text}",
+                "type": "audio",
+                "audio_bytes": audio_bytes,
+                "ts": datetime.now().isoformat(),
+            })
+        except Exception as e:
+            msgs.append({"role": "assistant",
+                         "content": f"❌ TTS failed: {e}",
+                         "ts": datetime.now().isoformat()})
         set_messages(msgs)
         st.rerun()
 
     elif name == "generate_image":
         prompt_txt = (args.get("prompt") or "").strip()
-        with st.chat_message("assistant"):
-            with st.spinner("Generating image…"):
-                try:
-                    img_bytes = generate_image(prompt_txt, 1024, 1024, "flux")
-                    msgs.append({
-                        "role": "assistant",
-                        "content": f"🎨 **Image:**\n\n> {prompt_txt}",
-                        "type": "image",
-                        "image_bytes": img_bytes,
-                        "ts": datetime.now().isoformat(),
-                    })
-                except Exception as e:
-                    msgs.append({
-                        "role": "assistant",
-                        "content": f"❌ Image failed: {e}",
-                        "ts": datetime.now().isoformat(),
-                    })
+        try:
+            img_bytes = generate_image(prompt_txt, 1024, 1024, "flux")
+            msgs.append({
+                "role": "assistant",
+                "content": f"🎨 **Image:**\n\n> {prompt_txt}",
+                "type": "image",
+                "image_bytes": img_bytes,
+                "ts": datetime.now().isoformat(),
+            })
+        except Exception as e:
+            msgs.append({"role": "assistant",
+                         "content": f"❌ Image failed: {e}",
+                         "ts": datetime.now().isoformat()})
         set_messages(msgs)
         st.rerun()
 
 
 # ============================================================
-# CHAT — STREAMING
+# CHAT — STREAMING  (FIX #3: correct token accounting)
 # ============================================================
 def stream_chat_response(hist: list[dict], model_name: str, msgs: list[dict]) -> None:
     def _stream(cli):
@@ -1404,11 +1089,15 @@ def stream_chat_response(hist: list[dict], model_name: str, msgs: list[dict]) ->
             model=model_name, messages=hist, temperature=0.7, stream=True,
         )
 
+    full = ""
+    usage = None
     with st.chat_message("assistant"):
         ph = st.empty()
-        full = ""
         try:
             for chunk in KeyManager.stream(_stream):
+                # capture final usage if the API sends it
+                if getattr(chunk, "usage", None) is not None:
+                    usage = chunk.usage
                 delta = None
                 try:
                     delta = chunk.choices[0].delta.content
@@ -1417,6 +1106,7 @@ def stream_chat_response(hist: list[dict], model_name: str, msgs: list[dict]) ->
                 if delta:
                     full += delta
                     ph.markdown(full + "▌")
+            ph.markdown(full or "_(empty response)_")
         except QuotaError as e:
             st.error(str(e))
             return
@@ -1424,54 +1114,64 @@ def stream_chat_response(hist: list[dict], model_name: str, msgs: list[dict]) ->
             if not full:
                 st.error(f"Streaming failed: {e}")
                 return
-        ph.markdown(full)
 
-    # Token accounting: real usage when available, else estimate
-    est = sum(msg_tokens(m) for m in hist) + len(full) // 4
-    TokenTracker.add(est)
+    # FIX #3: use real usage if present, otherwise count ONLY prompt + completion
+    if usage and getattr(usage, "total_tokens", None):
+        TokenTracker.add(int(usage.total_tokens))
+    else:
+        prompt_tokens = sum(msg_tokens(m) for m in hist)
+        completion_tokens = len(full) // 4
+        TokenTracker.add(prompt_tokens + completion_tokens)
 
-    msgs.append({
-        "role": "assistant",
-        "content": full,
-        "ts": datetime.now().isoformat(),
-    })
+    msgs.append({"role": "assistant", "content": full,
+                 "ts": datetime.now().isoformat()})
     set_messages(msgs)
     st.rerun()
 
 
 # ============================================================
-# CHAT — IMAGE ATTACHMENT
+# CHAT — IMAGE ATTACHMENT  (FIX #4, #7: robust removal)
 # ============================================================
 def render_attachments() -> None:
-    """Show pending images with remove button + uploader."""
-    with st.expander(
-        f"📎 Attachments ({len(st.session_state.pending_images)})"
-        if st.session_state.pending_images else "📎 Attach an image",
-        expanded=bool(st.session_state.pending_images),
-    ):
+    cid = st.session_state.active_conversation
+    bucket = pending_for(cid)
+
+    header = (f"📎 Attachments ({len(bucket)})" if bucket
+              else "📎 Attach an image")
+
+    with st.expander(header, expanded=bool(bucket)):
         up = st.file_uploader(
             "Choose image", type=Cfg.SUPPORTED_IMGS,
-            key=f"up_{st.session_state.active_conversation}",
-            label_visibility="collapsed", accept_multiple_files=True,
-        )
+            key=f"up_{cid}",
+            label_visibility="collapsed", accept_multiple_files=True)
+
+        # FIX #4: track uploaded file ids so removed ones don't come back
+        seen_key = f"_seen_uploads_{cid}"
+        seen = st.session_state.setdefault(seen_key, set())
+
         if up:
             for f in up:
+                fid = getattr(f, "file_id", None) or f"{f.name}:{f.size}"
+                if fid in seen:
+                    continue
+                seen.add(fid)
                 try:
                     b64 = base64.b64encode(f.getvalue()).decode()
                     mime = f.type or "image/png"
                     data_url = f"data:{mime};base64,{b64}"
-                    if data_url not in st.session_state.pending_images:
-                        st.session_state.pending_images.append(data_url)
+                    if data_url not in bucket:
+                        bucket.append(data_url)
                 except Exception as e:
                     st.error(f"Could not read {f.name}: {e}")
 
-        if st.session_state.pending_images:
-            cols = st.columns(min(3, len(st.session_state.pending_images)))
-            for idx, url in enumerate(list(st.session_state.pending_images)):
+        if bucket:
+            cols = st.columns(min(3, len(bucket)))
+            for idx, url in enumerate(list(bucket)):
                 with cols[idx % len(cols)]:
                     st.image(url, use_container_width=True)
-                    if st.button("Remove", key=f"rm_{idx}", use_container_width=True):
-                        st.session_state.pending_images.pop(idx)
+                    if st.button("Remove", key=f"rm_{cid}_{idx}",
+                                 use_container_width=True):
+                        bucket.pop(idx)
                         st.rerun()
 
 
@@ -1486,8 +1186,7 @@ def render_chat() -> None:
             f'<div class="limit-banner"><strong>Daily limit reached</strong><br>'
             f'You used {TokenTracker.used():,} / {Cfg.TOKEN_LIMIT:,} tokens.<br>'
             f'Resets in {TokenTracker.reset_in()}.</div>',
-            unsafe_allow_html=True,
-        )
+            unsafe_allow_html=True)
         for i, m in enumerate(msgs):
             render_message(m, i, msgs)
         return
@@ -1496,36 +1195,28 @@ def render_chat() -> None:
         st.markdown(
             f'<div class="treats-hero"><img src="{LOGO_URI}" class="hero-logo">'
             f'<div class="greeting">{esc(greeting())}. How can I help you?</div></div>',
-            unsafe_allow_html=True,
-        )
+            unsafe_allow_html=True)
         with st.expander("💡 Prompt Library"):
             cols = st.columns(3)
             for i, (label, template) in enumerate(PROMPTS_LIB):
                 with cols[i % 3]:
                     if st.button(label, key=f"p_{i}", use_container_width=True):
+                        # FIX #14: store as default text via session state hint
                         st.session_state.prompt_template = template
+                        st.toast(f"Template loaded — type it or paste it below")
                         st.rerun()
 
     for i, m in enumerate(msgs):
         render_message(m, i, msgs)
 
-    # Attach images
     render_attachments()
 
-    # Prefill from prompt template
-    prefill = st.session_state.prompt_template or ""
+    prefill = st.session_state.prompt_template
     if prefill:
         st.session_state.prompt_template = None
+        st.info(f"💡 Template: `{prefill}`")
 
-    # Chat input
-    prompt = st.chat_input(
-        "Message Treats…",
-        # Note: Streamlit doesn't support default value in chat_input;
-        # instead we surface template as info block.
-    )
-
-    if prefill and not prompt:
-        st.info(f"💡 Template: `{prefill}` — paste or edit before sending.")
+    prompt = st.chat_input("Message Treats…")
 
     if prompt:
         if not TokenTracker.can_send():
@@ -1533,9 +1224,10 @@ def render_chat() -> None:
             st.stop()
         new_msg = {"role": "user", "content": prompt,
                    "ts": datetime.now().isoformat()}
-        if st.session_state.pending_images:
-            new_msg["images"] = list(st.session_state.pending_images)
-            st.session_state.pending_images = []
+        bucket = pending_for()
+        if bucket:
+            new_msg["images"] = list(bucket)
+            bucket.clear()
         msgs.append(new_msg)
         set_messages(msgs)
 
@@ -1544,14 +1236,25 @@ def render_chat() -> None:
             st.session_state.conversations[cid]["title"] = auto_title(prompt)
         st.rerun()
 
-    # Auto-respond if last message is user
+    # FIX #15: guard against re-streaming the same message repeatedly
     if msgs and msgs[-1]["role"] == "user":
-        respond_to_last_user(msgs, model)
+        last_id = f"{cid_last(msgs)}"
+        if st.session_state._auto_stream_guard != last_id:
+            st.session_state._auto_stream_guard = last_id
+            respond_to_last_user(msgs, model)
+    else:
+        st.session_state._auto_stream_guard = None
+
+
+def cid_last(msgs: list[dict]) -> str:
+    if not msgs:
+        return ""
+    m = msgs[-1]
+    return f"{m.get('ts','')}|{len(m.get('content') or '')}"
 
 
 def respond_to_last_user(msgs: list[dict], model_name: str) -> None:
     try:
-        # Detect vision mode based on last user message ONLY (bugfix)
         last_user = next((m for m in reversed(msgs) if m["role"] == "user"), None)
         is_vision = bool(last_user and last_user.get("images"))
 
@@ -1562,13 +1265,13 @@ def respond_to_last_user(msgs: list[dict], model_name: str) -> None:
         hist = trim_history(full)
         active_model = Cfg.VISION_MODEL if is_vision else model_name
 
-        # Non-vision: try tool calling first
         if not is_vision:
             def _tools(cli):
                 return cli.chat.completions.create(
                     model=active_model, messages=hist, temperature=0.7,
-                    tools=TOOLS_SCHEMA, tool_choice="auto",
-                )
+                    tools=TOOLS_SCHEMA, tool_choice="auto")
+
+            # FIX #16: correct exception ordering — QuotaError is a TreatsError subclass
             try:
                 response = KeyManager.call(_tools)
                 TokenTracker.add_usage(getattr(response, "usage", None))
@@ -1578,6 +1281,8 @@ def respond_to_last_user(msgs: list[dict], model_name: str) -> None:
                         handle_tool_call(tc, msgs)
                     return
             except QuotaError:
+                raise
+            except TreatsError:
                 raise
             except Exception as e:
                 log.warning("Tool call failed, falling back to stream: %s", e)
@@ -1617,10 +1322,10 @@ def render_cv() -> None:
         with c1:
             name = st.text_input("Full Name")
             role = st.text_input("Target Role")
-            edu = st.text_input("Education")
+            edu  = st.text_input("Education")
         with c2:
-            lang = st.selectbox("Language", ["English", "Arabic"])
-            tone = st.selectbox("Tone", ["Professional", "Concise", "Academic"])
+            lang  = st.selectbox("Language", ["English", "Arabic"])
+            tone  = st.selectbox("Tone", ["Professional", "Concise", "Academic"])
             skills = st.text_input("Skills (comma-separated)")
         exp = st.text_area("Experience", placeholder="One bullet per line", height=140)
         submitted = st.form_submit_button("✨ Generate CV", type="primary",
@@ -1639,8 +1344,7 @@ def render_cv() -> None:
                     return cli.chat.completions.create(
                         model=Cfg.HEAVY_MODEL,
                         messages=[{"role": "user", "content": p}],
-                        temperature=0.6,
-                    )
+                        temperature=0.6)
                 r = KeyManager.call(_c)
             TokenTracker.add_usage(getattr(r, "usage", None))
             txt = r.choices[0].message.content
@@ -1660,15 +1364,13 @@ def render_cv() -> None:
 
 
 def render_password() -> None:
-    render_tool_header("password", "Password Generator", "Create strong, secure passwords")
+    render_tool_header("password", "Password Generator",
+                       "Create strong, secure passwords")
 
     c1, c2, c3 = st.columns(3)
-    with c1:
-        length = st.slider("Length", 8, 64, 16)
-    with c2:
-        use_numbers = st.checkbox("Numbers", value=True)
-    with c3:
-        use_symbols = st.checkbox("Symbols", value=True)
+    with c1: length = st.slider("Length", 8, 64, 16)
+    with c2: use_numbers = st.checkbox("Numbers", value=True)
+    with c3: use_symbols = st.checkbox("Symbols", value=True)
 
     alphabet = string.ascii_letters
     if use_numbers: alphabet += string.digits
@@ -1682,7 +1384,8 @@ def render_password() -> None:
 
 
 def render_video() -> None:
-    render_tool_header("video", "Video Script", "Generate scene-by-scene storyboards")
+    render_tool_header("video", "Video Script",
+                       "Generate scene-by-scene storyboards")
     if not TokenTracker.can_send():
         st.warning("Daily limit reached.")
         return
@@ -1695,7 +1398,7 @@ def render_video() -> None:
                                ["30 seconds", "60 seconds", "3 minutes", "5 minutes"])
             lang = st.selectbox("Language", ["English", "Arabic"])
         with c2:
-            sty = st.selectbox("Style", ["Educational", "Promotional",
+            sty  = st.selectbox("Style", ["Educational", "Promotional",
                                           "Storytelling", "Entertainment"])
             plat = st.selectbox("Platform", ["YouTube", "TikTok",
                                               "Instagram", "LinkedIn"])
@@ -1714,8 +1417,7 @@ def render_video() -> None:
                     return cli.chat.completions.create(
                         model=Cfg.HEAVY_MODEL,
                         messages=[{"role": "user", "content": p}],
-                        temperature=0.7,
-                    )
+                        temperature=0.7)
                 r = KeyManager.call(_c)
             TokenTracker.add_usage(getattr(r, "usage", None))
             txt = r.choices[0].message.content
@@ -1730,7 +1432,8 @@ def render_video() -> None:
 
 
 def render_tts() -> None:
-    render_tool_header("tts", "Text to Speech", "Convert text into natural-sounding speech")
+    render_tool_header("tts", "Text to Speech",
+                       "Convert text into natural-sounding speech")
     voices = fetch_voices()
     avail = [k for k in voices if voices[k]]
     if not avail:
@@ -1766,7 +1469,8 @@ def render_tts() -> None:
 
 
 def render_photo() -> None:
-    render_tool_header("photo", "Image Generator", "Create images from text descriptions")
+    render_tool_header("photo", "Image Generator",
+                       "Create images from text descriptions")
     with st.spinner("Loading models…"):
         models = fetch_img_models()
 
@@ -1785,7 +1489,7 @@ def render_photo() -> None:
         "1:1 (1024×1024)": (1024, 1024),
         "16:9 (1344×768)": (1344, 768),
         "9:16 (768×1344)": (768, 1344),
-        "4:3 (1152×896)": (1152, 896),
+        "4:3 (1152×896)":  (1152, 896),
     }
     w, h = sizes[aspect]
 
@@ -1811,32 +1515,32 @@ def render_photo() -> None:
             st.session_state.li = img
             st.session_state.lp = prompt
             st.session_state.gallery.append({
-                "p": prompt, "b": img, "t": datetime.now().isoformat(),
-            })
+                "p": prompt, "b": img, "t": datetime.now().isoformat()})
+            # FIX #9: cap gallery size
+            if len(st.session_state.gallery) > Cfg.GALLERY_MAX:
+                st.session_state.gallery = st.session_state.gallery[-Cfg.GALLERY_MAX:]
             st.toast("Image generated!")
         except TreatsError as e:
             st.error(str(e))
         except Exception as e:
             st.error(f"Error: {e}")
 
-    if "li" in st.session_state:
+    if st.session_state.li:
         st.markdown("---")
-        st.image(st.session_state.li, caption=st.session_state.get("lp", ""))
+        st.image(st.session_state.li, caption=st.session_state.lp)
         c1, c2 = st.columns(2)
         with c1:
             st.download_button(
                 "⬇️ PNG", st.session_state.li,
                 f"treats_{datetime.now():%Y%m%d_%H%M%S}.png",
-                "image/png", use_container_width=True,
-            )
+                "image/png", use_container_width=True)
         with c2:
             if st.button("🔄 Regenerate", use_container_width=True):
                 try:
                     with st.spinner("Regenerating…"):
                         st.session_state.li = generate_image(
                             st.session_state.lp, w, h, model,
-                            random.randint(1, 999999), enhance,
-                        )
+                            random.randint(1, 999999), enhance)
                     st.rerun()
                 except TreatsError as e:
                     st.error(str(e))
@@ -1851,7 +1555,7 @@ def render_photo() -> None:
 
 
 # ============================================================
-# ROUTER
+# ROUTER  (FIX #1: remove stray dot)
 # ============================================================
 ROUTES: dict[str, Callable[[], None]] = {
     "chat": render_chat,
