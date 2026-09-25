@@ -1,20 +1,24 @@
 # ============================================================
-# Treats v4.0 — Streamlit AI Assistant
+# Treats v5.0 — Streamlit AI Assistant
 # ============================================================
-import streamlit as st
-import requests
-import json
-import random
-import asyncio
-import io
-import base64
-import zipfile
-import os
-import logging
-from urllib.parse import quote
-from datetime import datetime, date, time, timedelta
-from typing import Optional, Callable, Any
+from __future__ import annotations
 
+import asyncio
+import base64
+import html
+import io
+import json
+import logging
+import os
+import random
+import string
+import zipfile
+from dataclasses import dataclass, field, asdict
+from datetime import date, datetime, time, timedelta
+from typing import Any, Callable, Iterable, Optional
+
+import requests
+import streamlit as st
 import streamlit.components.v1 as components
 
 try:
@@ -33,41 +37,49 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("treats")
 
+
 # ============================================================
-# CONSTANTS
+# CONFIG
 # ============================================================
 class Cfg:
     KEY_SLOTS       = 10
-    TOKEN_LIMIT     = 5000
+    TOKEN_LIMIT     = 5_000
     TOKEN_WARN_AT   = 0.80
-    MAX_CTX         = 6000
+    MAX_CTX         = 6_000
     GROQ_MODELS     = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"]
     VISION_MODELS   = [
         "meta-llama/llama-4-scout-17b-16e-instruct",
         "meta-llama/llama-4-maverick-17b-128e-instruct",
     ]
-    DEFAULT_MODEL   = "openai/gpt-oss-20b"
-    HEAVY_MODEL     = "openai/gpt-oss-120b"
+    DEFAULT_MODEL   = GROQ_MODELS[0]
+    HEAVY_MODEL     = GROQ_MODELS[1]
     VISION_MODEL    = VISION_MODELS[0]
     SUPPORTED_IMGS  = ["png", "jpg", "jpeg", "webp", "gif"]
+    STREAM_TIMEOUT  = 60
+    PERSIST_PATH    = ".treats_state.json"
+
 
 # ============================================================
 # EXCEPTIONS
 # ============================================================
 class TreatsError(Exception):
-    """خطأ عام للتطبيق."""
+    """Base app error (user-displayable)."""
 
 class QuotaError(TreatsError):
-    """خطأ نفاد الحصة من Groq."""
+    """All API keys exhausted."""
+
+class ConfigError(TreatsError):
+    """Missing/invalid configuration."""
+
 
 # ============================================================
-# API KEY ROTATION
+# KEY MANAGER
 # ============================================================
 class KeyManager:
-    """يدير مفاتيح Groq ويبدل بينها تلقائياً عند نفاد الحصة."""
+    """Rotates Groq API keys on quota exhaustion (mid-stream safe)."""
 
     QUOTA_TRIGGERS = (
         "429", "rate limit", "rate_limit", "rate-limit",
@@ -75,25 +87,6 @@ class KeyManager:
         "resourceexhausted", "resource exhausted",
         "exceeded", "tokens per minute", "requests per minute",
     )
-
-    @staticmethod
-    def load_keys() -> list[str]:
-        keys: list[str] = []
-        for i in range(1, Cfg.KEY_SLOTS + 1):
-            k = KeyManager._read(f"GROQ_API_KEY_{i}")
-            if k:
-                keys.append(k)
-
-        if not keys:
-            single = KeyManager._read("GROQ_API_KEY")
-            if single:
-                keys.append(single)
-
-        if not keys:
-            raise TreatsError(
-                "No GROQ API keys found. Add GROQ_API_KEY_1..10 in secrets."
-            )
-        return keys
 
     @staticmethod
     def _read(name: str) -> Optional[str]:
@@ -106,115 +99,135 @@ class KeyManager:
             val = os.getenv(name)
         return val.strip() if val and str(val).strip() else None
 
-    @staticmethod
-    def current_index() -> int:
-        if "key_index" not in st.session_state:
-            st.session_state.key_index = 0
-        keys = KeyManager.load_keys()
-        if st.session_state.key_index >= len(keys):
-            st.session_state.key_index = 0
+    @classmethod
+    def load(cls) -> list[str]:
+        keys = [k for i in range(1, Cfg.KEY_SLOTS + 1)
+                if (k := cls._read(f"GROQ_API_KEY_{i}"))]
+        if not keys and (single := cls._read("GROQ_API_KEY")):
+            keys = [single]
+        if not keys:
+            raise ConfigError("No GROQ_API_KEY_1..10 found in secrets or environment.")
+        return keys
+
+    @classmethod
+    def index(cls) -> int:
+        st.session_state.setdefault("key_index", 0)
+        n = len(cls.load())
+        st.session_state.key_index %= n
         return st.session_state.key_index
 
-    @staticmethod
-    def rotate() -> int:
-        keys = KeyManager.load_keys()
-        st.session_state.key_index = (st.session_state.key_index + 1) % len(keys)
-        log.info(f"Rotated to key #{st.session_state.key_index + 1}")
+    @classmethod
+    def rotate(cls) -> int:
+        n = len(cls.load())
+        st.session_state.key_index = (st.session_state.key_index + 1) % n
+        log.info("Rotated to key #%d", st.session_state.key_index + 1)
         return st.session_state.key_index
 
-    @staticmethod
-    def client():
+    @classmethod
+    def client(cls):
         from groq import Groq
-        keys = KeyManager.load_keys()
-        return Groq(api_key=keys[KeyManager.current_index()])
+        return Groq(api_key=cls.load()[cls.index()])
 
-    @staticmethod
-    def is_quota_error(exc: Exception) -> bool:
+    @classmethod
+    def is_quota_error(cls, exc: BaseException) -> bool:
         s = str(exc).lower()
-        return any(t in s for t in KeyManager.QUOTA_TRIGGERS)
+        return any(t in s for t in cls.QUOTA_TRIGGERS)
 
-    @staticmethod
-    def call(create_fn: Callable[[Any], Any], max_retries: Optional[int] = None) -> Any:
-        """يستدعي Groq مع تبديل تلقائي بين المفاتيح عند نفاد الحصة."""
-        keys = KeyManager.load_keys()
-        retries = max_retries if max_retries is not None else len(keys)
-        last_err: Optional[Exception] = None
-
-        for attempt in range(retries):
+    @classmethod
+    def call(cls, fn: Callable[[Any], Any], retries: Optional[int] = None) -> Any:
+        keys = cls.load()
+        attempts = retries if retries is not None else len(keys)
+        last: Optional[BaseException] = None
+        for i in range(attempts):
             try:
-                return create_fn(KeyManager.client())
+                return fn(cls.client())
             except Exception as e:
-                if KeyManager.is_quota_error(e) and attempt < retries - 1:
-                    last_err = e
-                    KeyManager.rotate()
+                if cls.is_quota_error(e) and i < attempts - 1:
+                    last = e
+                    cls.rotate()
+                    continue
+                raise
+        if last:
+            raise QuotaError(f"All {len(keys)} API keys exhausted. Last: {last}")
+
+    @classmethod
+    def stream(cls, fn: Callable[[Any], Iterable[Any]]) -> Iterable[Any]:
+        """Yield-safe streaming with mid-stream rotation on quota errors."""
+        keys = cls.load()
+        for i in range(len(keys)):
+            try:
+                for chunk in fn(cls.client()):
+                    yield chunk
+                return
+            except Exception as e:
+                if cls.is_quota_error(e) and i < len(keys) - 1:
+                    log.warning("Stream quota error, rotating key")
+                    cls.rotate()
                     continue
                 raise
 
-        if last_err:
-            raise last_err
 
 # ============================================================
-# TOKEN TRACKING
+# TOKEN TRACKER
 # ============================================================
 class TokenTracker:
-    """يتابع استهلاك التوكنز اليومي مع تصفير تلقائي عند منتصف الليل."""
-
     @staticmethod
     def _today() -> str:
         return date.today().isoformat()
 
-    @staticmethod
-    def reset_if_needed() -> None:
-        if st.session_state.get("token_date") != TokenTracker._today():
-            st.session_state.token_date = TokenTracker._today()
+    @classmethod
+    def _reset_if_needed(cls) -> None:
+        if st.session_state.get("token_date") != cls._today():
+            st.session_state.token_date = cls._today()
             st.session_state.tokens_used = 0
             st.session_state.warned_80 = False
 
-    @staticmethod
-    def used() -> int:
-        return st.session_state.get("tokens_used", 0)
+    @classmethod
+    def used(cls) -> int:
+        cls._reset_if_needed()
+        return int(st.session_state.get("tokens_used", 0))
 
-    @staticmethod
-    def remaining() -> int:
-        return max(0, Cfg.TOKEN_LIMIT - TokenTracker.used())
+    @classmethod
+    def remaining(cls) -> int:
+        return max(0, Cfg.TOKEN_LIMIT - cls.used())
 
-    @staticmethod
-    def can_send() -> bool:
-        TokenTracker.reset_if_needed()
-        return TokenTracker.used() < Cfg.TOKEN_LIMIT
+    @classmethod
+    def can_send(cls) -> bool:
+        return cls.remaining() > 0
 
-    @staticmethod
-    def add(n: int) -> None:
+    @classmethod
+    def add(cls, n: int) -> None:
         if n <= 0:
             return
-        st.session_state.tokens_used = TokenTracker.used() + n
+        cls._reset_if_needed()
+        st.session_state.tokens_used = cls.used() + int(n)
         if (st.session_state.tokens_used >= Cfg.TOKEN_LIMIT * Cfg.TOKEN_WARN_AT
                 and not st.session_state.get("warned_80")):
             st.session_state.warned_80 = True
-            st.toast(f"⚠️ استهلكت {int(Cfg.TOKEN_WARN_AT*100)}% من توكنز اليوم")
+            st.toast(f"⚠️ Used {int(Cfg.TOKEN_WARN_AT * 100)}% of today's tokens")
 
-    @staticmethod
-    def add_from_usage(usage: Any) -> None:
-        if usage and hasattr(usage, "total_tokens"):
-            TokenTracker.add(getattr(usage, "total_tokens", 0) or 0)
+    @classmethod
+    def add_usage(cls, usage: Any) -> None:
+        if usage is None:
+            return
+        total = getattr(usage, "total_tokens", None)
+        if total:
+            cls.add(int(total))
 
-    @staticmethod
-    def seconds_until_midnight() -> int:
+    @classmethod
+    def reset_in(cls) -> str:
         now = datetime.now()
         tomorrow = datetime.combine(now.date() + timedelta(days=1), time.min)
-        return int((tomorrow - now).total_seconds())
-
-    @staticmethod
-    def time_until_reset_str() -> str:
-        s = TokenTracker.seconds_until_midnight()
-        h, rem = divmod(s, 3600)
+        secs = int((tomorrow - now).total_seconds())
+        h, rem = divmod(secs, 3600)
         m, _ = divmod(rem, 60)
         return f"{h}h {m}m"
 
+
 # ============================================================
-# SESSION STATE INIT
+# STATE
 # ============================================================
-DEFAULT_STATE = {
+DEFAULTS: dict[str, Any] = {
     "dark_mode": False,
     "density": "comfortable",
     "font_size": "medium",
@@ -228,25 +241,36 @@ DEFAULT_STATE = {
     "warned_80": False,
     "conversations": None,
     "active_conversation": None,
+    "pending_images": [],          # attached but unsent
+    "prompt_template": None,
+    "editing_msg": None,
+    "last_error": None,
 }
 
-for k, v in DEFAULT_STATE.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+for k, v in DEFAULTS.items():
+    st.session_state.setdefault(k, v)
 
-TokenTracker.reset_if_needed()
+TokenTracker._reset_if_needed()
+
 
 # ============================================================
 # LOGO
 # ============================================================
 LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
   <defs>
-    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#a855f7"/><stop offset="100%" stop-color="#6c3ef5"/></linearGradient>
-    <linearGradient id="g2" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#312e81"/><stop offset="100%" stop-color="#1e1b4b"/></linearGradient>
+    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a855f7"/><stop offset="100%" stop-color="#6c3ef5"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#312e81"/><stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
   </defs>
-  <ellipse cx="42" cy="22" rx="14" ry="10" fill="url(#g1)"/><ellipse cx="78" cy="22" rx="14" ry="10" fill="url(#g1)"/>
-  <ellipse cx="42" cy="22" rx="6" ry="4" fill="#fff"/><ellipse cx="78" cy="22" rx="6" ry="4" fill="#fff"/>
-  <circle cx="14" cy="70" r="12" fill="url(#g1)"/><circle cx="106" cy="70" r="12" fill="url(#g1)"/>
+  <ellipse cx="42" cy="22" rx="14" ry="10" fill="url(#g1)"/>
+  <ellipse cx="78" cy="22" rx="14" ry="10" fill="url(#g1)"/>
+  <ellipse cx="42" cy="22" rx="6" ry="4" fill="#fff"/>
+  <ellipse cx="78" cy="22" rx="6" ry="4" fill="#fff"/>
+  <circle cx="14" cy="70" r="12" fill="url(#g1)"/>
+  <circle cx="106" cy="70" r="12" fill="url(#g1)"/>
   <rect x="20" y="35" width="80" height="70" rx="30" fill="#f5f3ff"/>
   <rect x="28" y="43" width="64" height="54" rx="24" fill="url(#g2)"/>
   <path d="M42 62 Q46 57 50 62" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>
@@ -255,21 +279,24 @@ LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
 </svg>"""
 LOGO_URI = "data:image/svg+xml;base64," + base64.b64encode(LOGO_SVG.encode()).decode()
 
+
 # ============================================================
 # CSS
 # ============================================================
-def load_css(dark: bool, density: str, font_size: str) -> None:
-    C = {
-        True: dict(bg="#0b0b0f", sbg1="#141418", sbg2="#1a1a20", surf="#15151b", surf2="#1f1f26",
-                   bord="#26262e", bsoft="#1d1d23", txt="#f0f0f3", tsoft="#a0a0ab",
-                   tmuted="#6e6e7a", hov="#1f1f26", act="#272730", bbtn="#1a1a20", bhv="#23232b",
-                   bbd="#2c2c35", accent="#a855f7", accent2="#6c3ef5"),
-        False: dict(bg="#ffffff", sbg1="#fbfaff", sbg2="#f5f3ff", surf="#ffffff", surf2="#f9f9fb",
-                    bord="#ececf1", bsoft="#f4f4f8", txt="#0e0e11", tsoft="#6b6b78",
-                    tmuted="#9a9aa8", hov="#f7f5ff", act="#f0ecff", bbtn="#ffffff", bhv="#f7f7fb",
-                    bbd="#e5e5ed", accent="#6c3ef5", accent2="#a855f7"),
-    }[dark]
+_PALETTES = {
+    True: dict(bg="#0b0b0f", sbg1="#141418", sbg2="#1a1a20", surf="#15151b", surf2="#1f1f26",
+               bord="#26262e", bsoft="#1d1d23", txt="#f0f0f3", tsoft="#a0a0ab",
+               tmuted="#6e6e7a", hov="#1f1f26", act="#272730", bbtn="#1a1a20", bhv="#23232b",
+               bbd="#2c2c35", accent="#a855f7", input_bg="#15151b", input_txt="#f0f0f3"),
+    False: dict(bg="#ffffff", sbg1="#fbfaff", sbg2="#f5f3ff", surf="#ffffff", surf2="#f9f9fb",
+                bord="#ececf1", bsoft="#f4f4f8", txt="#0e0e11", tsoft="#6b6b78",
+                tmuted="#9a9aa8", hov="#f7f5ff", act="#f0ecff", bbtn="#ffffff", bhv="#f7f7fb",
+                bbd="#e5e5ed", accent="#6c3ef5", input_bg="#ffffff", input_txt="#0d0d0d"),
+}
 
+
+def load_css(dark: bool, density: str, font_size: str) -> None:
+    C = _PALETTES[dark]
     fs_base = {"small": "13.5px", "medium": "15px", "large": "17px"}[font_size]
     fs_h1   = {"small": "26px", "medium": "30px", "large": "35px"}[font_size]
     fs_tool = {"small": "23px", "medium": "27px", "large": "31px"}[font_size]
@@ -282,6 +309,9 @@ def load_css(dark: bool, density: str, font_size: str) -> None:
         html, body, [class*="css"] {{
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             -webkit-font-smoothing: antialiased;
+        }}
+        @media (prefers-reduced-motion: reduce) {{
+            *, *::before, *::after {{ animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }}
         }}
 
         #MainMenu, footer, [data-testid="stDecoration"], [data-testid="stStatusWidget"],
@@ -298,8 +328,7 @@ def load_css(dark: bool, density: str, font_size: str) -> None:
         ::-webkit-scrollbar-thumb {{ background: {C['bord']}; border-radius: 4px; }}
         ::-webkit-scrollbar-thumb:hover {{ background: {C['tmuted']}; }}
 
-        * {{ -webkit-tap-highlight-color: transparent; }}
-        button, .stButton, .stDownloadButton, label, h1,h2,h3,h4,h5,h6,
+        button, .stButton, .stDownloadButton, label, h1, h2, h3, h4, h5, h6,
         .tool-header, .treats-brand, .sidebar-footer, .treats-hero, [data-testid="stSidebar"] {{
             -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
         }}
@@ -355,7 +384,6 @@ def load_css(dark: bool, density: str, font_size: str) -> None:
             background-position: center !important; background-size: 20px 20px !important;
             border-radius: 7px; padding: 5px; box-sizing: content-box;
         }}
-
         label[data-baseweb="radio"]:nth-of-type(1)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2.2'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>") !important; background-color: #eef2ff; }}
         label[data-baseweb="radio"]:nth-of-type(2)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2.2'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/><polyline points='14 2 14 8 20 8'/></svg>") !important; background-color: #dbeafe; }}
         label[data-baseweb="radio"]:nth-of-type(3)::before {{ background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2310b981' stroke-width='2.2'><rect x='3' y='11' width='18' height='11' rx='2'/><path d='M7 11V7a5 5 0 0 1 10 0v4'/></svg>") !important; background-color: #d1fae5; }}
@@ -409,7 +437,7 @@ def load_css(dark: bool, density: str, font_size: str) -> None:
         }}
         section.main > div.block-container, .main .block-container {{
             width: 100% !important; max-width: 820px !important;
-            margin: 0 auto !important; padding: 2rem 1.5rem 6rem 1.5rem !important;
+            margin: 0 auto !important; padding: 2rem 1.5rem 7rem 1.5rem !important;
         }}
 
         [data-testid="stChatInput"], [data-testid="stBottomBlockContainer"] {{
@@ -423,7 +451,7 @@ def load_css(dark: bool, density: str, font_size: str) -> None:
         [data-testid="stChatInput"],
         [data-testid="stChatInput"] > div,
         [data-testid="stChatInput"] > div > div {{
-            background: #ffffff !important;
+            background: {C['input_bg']} !important;
         }}
         [data-testid="stChatInput"] {{
             border-radius: 16px !important;
@@ -437,12 +465,13 @@ def load_css(dark: bool, density: str, font_size: str) -> None:
             transform: translateY(-1px);
         }}
         [data-testid="stChatInput"] textarea {{
-            background: #ffffff !important;
-            color: #0d0d0d !important; -webkit-text-fill-color: #0d0d0d !important;
-            caret-color: #6c3ef5 !important; font-size: 15px !important;
+            background: {C['input_bg']} !important;
+            color: {C['input_txt']} !important;
+            -webkit-text-fill-color: {C['input_txt']} !important;
+            caret-color: {C['accent']} !important; font-size: 15px !important;
         }}
         [data-testid="stChatInput"] textarea::placeholder {{
-            color: #9a9aa8 !important; -webkit-text-fill-color: #9a9aa8 !important;
+            color: {C['tmuted']} !important; -webkit-text-fill-color: {C['tmuted']} !important;
         }}
 
         h1, h2, h3, h4, h5, h6 {{ color: {C['txt']} !important; }}
@@ -463,12 +492,12 @@ def load_css(dark: bool, density: str, font_size: str) -> None:
             margin: 3px 0 0 0 !important; color: {C['tsoft']} !important; font-size: 13.5px !important;
         }}
 
-        .theme-chat .icon {{ background: linear-gradient(135deg, #eef2ff, #e0e7ff); }}
-        .theme-cv .icon {{ background: linear-gradient(135deg, #dbeafe, #bfdbfe); }}
-        .theme-pass .icon {{ background: linear-gradient(135deg, #d1fae5, #a7f3d0); }}
-        .theme-video .icon {{ background: linear-gradient(135deg, #ffedd5, #fed7aa); }}
-        .theme-tts .icon {{ background: linear-gradient(135deg, #fce7f3, #fbcfe8); }}
-        .theme-photo .icon {{ background: linear-gradient(135deg, #ede9fe, #ddd6fe); }}
+        .theme-chat   .icon {{ background: linear-gradient(135deg, #eef2ff, #e0e7ff); }}
+        .theme-cv     .icon {{ background: linear-gradient(135deg, #dbeafe, #bfdbfe); }}
+        .theme-pass   .icon {{ background: linear-gradient(135deg, #d1fae5, #a7f3d0); }}
+        .theme-video  .icon {{ background: linear-gradient(135deg, #ffedd5, #fed7aa); }}
+        .theme-tts    .icon {{ background: linear-gradient(135deg, #fce7f3, #fbcfe8); }}
+        .theme-photo  .icon {{ background: linear-gradient(135deg, #ede9fe, #ddd6fe); }}
 
         .stButton > button {{
             background: {C['bbtn']}; color: {C['txt']};
@@ -479,6 +508,9 @@ def load_css(dark: bool, density: str, font_size: str) -> None:
         .stButton > button:hover {{
             background: {C['bhv']}; border-color: {C['accent']}; color: {C['accent']};
             transform: translateY(-1.5px); box-shadow: 0 6px 16px rgba(108, 62, 245, 0.12);
+        }}
+        .stButton > button:focus-visible {{
+            outline: 2px solid {C['accent']} !important; outline-offset: 2px !important;
         }}
         .stButton > button[kind="primary"] {{
             background: linear-gradient(135deg, #6c3ef5 0%, #a855f7 100%);
@@ -521,7 +553,7 @@ def load_css(dark: bool, density: str, font_size: str) -> None:
         [data-testid="stChatMessage"]:last-child {{ border-bottom: none; }}
         @keyframes msgIn {{
             from {{ opacity: 0; transform: translateY(10px); }}
-            to {{ opacity: 1; transform: translateY(0); }}
+            to   {{ opacity: 1; transform: translateY(0); }}
         }}
 
         code {{
@@ -541,7 +573,7 @@ def load_css(dark: bool, density: str, font_size: str) -> None:
         }}
         @keyframes heroIn {{
             from {{ opacity: 0; transform: scale(0.95); }}
-            to {{ opacity: 1; transform: scale(1); }}
+            to   {{ opacity: 1; transform: scale(1); }}
         }}
         .treats-hero .hero-logo {{
             width: 160px !important; height: 160px !important;
@@ -556,7 +588,7 @@ def load_css(dark: bool, density: str, font_size: str) -> None:
         }}
         @keyframes float {{
             0%, 100% {{ transform: translateY(0); }}
-            50% {{ transform: translateY(-10px); }}
+            50%      {{ transform: translateY(-10px); }}
         }}
 
         details {{
@@ -599,10 +631,18 @@ def load_css(dark: bool, density: str, font_size: str) -> None:
         }}
 
         .limit-banner {{
-            background: #fef2f2; border: 1px solid #fecaca;
-            color: #991b1b; padding: 18px 22px; border-radius: 14px;
-            margin-bottom: 24px;
+            background: {('#450a0a' if dark else '#fef2f2')};
+            border: 1px solid {('#7f1d1d' if dark else '#fecaca')};
+            color: {('#fecaca' if dark else '#991b1b')};
+            padding: 18px 22px; border-radius: 14px; margin-bottom: 24px;
         }}
+        .attach-chip {{
+            display: inline-flex; align-items: center; gap: 8px;
+            background: {C['surf2']}; border: 1px solid {C['bord']};
+            border-radius: 10px; padding: 6px 12px; font-size: 12px;
+            color: {C['tsoft']}; margin: 4px 4px 4px 0;
+        }}
+        .msg-meta {{ font-size: 11px; color: {C['tmuted']}; margin-top: 6px; }}
 
         @media (min-width: 1024px) {{
             [data-testid="stSidebar"] {{
@@ -652,12 +692,11 @@ def load_css(dark: bool, density: str, font_size: str) -> None:
     """, unsafe_allow_html=True)
 
 
-load_css(st.session_state.dark_mode,
-         st.session_state.density,
-         st.session_state.font_size)
+load_css(st.session_state.dark_mode, st.session_state.density, st.session_state.font_size)
+
 
 # ============================================================
-# JS: Sidebar toggle + Auto-scroll
+# JS HELPERS
 # ============================================================
 components.html("""
 <script>
@@ -720,16 +759,30 @@ components.html("""
         }
         lastCount = c;
     }
-    try {
-        new MutationObserver(check).observe(doc.body, { childList: true, subtree: true });
-    } catch(e) {}
+    try { new MutationObserver(check).observe(doc.body, { childList: true, subtree: true }); }
+    catch(e) {}
     setInterval(check, 700);
+
+    // Keyboard shortcuts: Cmd/Ctrl+K new chat, Cmd/Ctrl+/ focus input
+    window.parent.addEventListener('keydown', function(e) {
+        const mod = e.metaKey || e.ctrlKey;
+        if (!mod) return;
+        if (e.key === 'k' || e.key === 'K') {
+            const btn = doc.querySelector('button[kind="primary"]');
+            if (btn && btn.textContent.includes('New chat')) { e.preventDefault(); btn.click(); }
+        }
+        if (e.key === '/') {
+            const ta = doc.querySelector('[data-testid="stChatInput"] textarea');
+            if (ta) { e.preventDefault(); ta.focus(); }
+        }
+    });
 })();
 </script>
 """, height=0)
 
+
 # ============================================================
-# PROMPTS & SCHEMAS
+# PROMPTS
 # ============================================================
 SYS_CHAT = """You are Treats, a helpful AI assistant.
 
@@ -750,9 +803,7 @@ The user may upload images and ask about them. Analyze images carefully:
 
 Be concise. Never use emojis unless the user does."""
 
-TITLE_PROMPT = """Generate a short title (3-5 words). Return ONLY the title.
-
-Message: {message}"""
+TITLE_PROMPT = "Generate a short title (3-5 words). Return ONLY the title.\n\nMessage: {message}"
 
 TOOLS_SCHEMA = [
     {"type": "function", "function": {
@@ -773,14 +824,30 @@ TOOLS_SCHEMA = [
     }},
 ]
 
+PROMPTS_LIB = [
+    ("Explain",    "Explain {topic} in simple terms."),
+    ("Summarize",  "Summarize in 5 bullets:\n\n{text}"),
+    ("Translate",  "Translate to {language}:\n\n{text}"),
+    ("Email",      "Write a professional email about {topic}."),
+    ("Code",       "Write Python code that {task}."),
+    ("Brainstorm", "Give me 10 ideas about {topic}."),
+]
+
+
 # ============================================================
-# HELPERS
+# UTILITIES
 # ============================================================
-def get_greeting() -> str:
+def esc(s: Any) -> str:
+    """HTML-escape user content before embedding in st.markdown html."""
+    return html.escape(str(s), quote=True)
+
+
+def greeting() -> str:
     h = datetime.now().hour
-    if h < 12: return "Good morning"
-    if h < 17: return "Good afternoon"
-    return "Good evening"
+    if h < 12:  return "Good morning"
+    if h < 17:  return "Good afternoon"
+    if h < 22:  return "Good evening"
+    return "Working late"
 
 
 def fmt_time(iso: str) -> str:
@@ -790,34 +857,39 @@ def fmt_time(iso: str) -> str:
         return ""
 
 
-def copy_to_clipboard(text: str, key: str) -> None:
+def copy_to_clipboard(text: str) -> None:
     js_text = json.dumps(text)
     components.html(
-        f"""<script>(function(){{var ta=document.createElement('textarea');ta.value={js_text};"""
-        f"""ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);"""
-        f"""ta.select();try{{document.execCommand('copy');}}catch(e){{}}"""
-        f"""document.body.removeChild(ta);}})();</script>""",
-        height=0
+        f"""<script>(async function(){{
+            try {{
+                await navigator.clipboard.writeText({js_text});
+            }} catch(e) {{
+                var ta=document.createElement('textarea'); ta.value={js_text};
+                ta.style.position='fixed'; ta.style.opacity='0';
+                document.body.appendChild(ta); ta.select();
+                try{{document.execCommand('copy');}}catch(_){{}}
+                document.body.removeChild(ta);
+            }}
+        }})();</script>""",
+        height=0,
     )
 
 
-def message_tokens(m: dict) -> int:
-    """يقدّر عدد توكنز رسالة (يدعم الصور)."""
+def msg_tokens(m: dict) -> int:
     c = m.get("content", "") or ""
     if isinstance(c, list):
-        t = sum(len(item.get("text", "")) for item in c
-                if isinstance(item, dict) and item.get("type") == "text") // 4
-        t += 500 * sum(1 for item in c
-                       if isinstance(item, dict) and item.get("type") == "image_url")
+        t = sum(len(i.get("text", "")) for i in c
+                if isinstance(i, dict) and i.get("type") == "text") // 4
+        t += 500 * sum(1 for i in c
+                       if isinstance(i, dict) and i.get("type") == "image_url")
         return t
     return len(c) // 4
 
 
-def trim_history(msgs: list, max_tokens: int = Cfg.MAX_CTX) -> list:
-    total = 0
-    out: list = []
+def trim_history(msgs: list[dict], max_tokens: int = Cfg.MAX_CTX) -> list[dict]:
+    total, out = 0, []
     for m in reversed(msgs):
-        t = message_tokens(m)
+        t = msg_tokens(m)
         if total + t > max_tokens:
             break
         out.insert(0, m)
@@ -828,57 +900,51 @@ def trim_history(msgs: list, max_tokens: int = Cfg.MAX_CTX) -> list:
 
 
 def build_api_message(m: dict) -> dict:
-    """يحوّل رسالة التخزين لشكل Groq API (يدعم الصور)."""
     imgs = m.get("images") or []
     if imgs:
-        content = [{"type": "text", "text": m.get("content", "") or " "}]
-        for img in imgs:
-            content.append({"type": "image_url", "image_url": {"url": img}})
+        content = [{"type": "text", "text": m.get("content") or " "}]
+        for url in imgs:
+            content.append({"type": "image_url", "image_url": {"url": url}})
         return {"role": m["role"], "content": content}
-    return {"role": m["role"], "content": m.get("content", "") or ""}
+    return {"role": m["role"], "content": m.get("content") or ""}
 
 
 # ============================================================
 # CONVERSATIONS
 # ============================================================
+def _new_conv_dict(cid: str, title: str = "New chat") -> dict:
+    return {"id": cid, "title": title, "messages": [],
+            "created": datetime.now().isoformat(), "updated": datetime.now().isoformat()}
+
+
 def init_conversations() -> None:
     if st.session_state.conversations is None:
-        default_id = "default"
-        st.session_state.conversations = {
-            default_id: {
-                "id": default_id,
-                "title": "New chat",
-                "messages": [],
-                "created": datetime.now().isoformat(),
-            }
-        }
-        st.session_state.active_conversation = default_id
+        did = "default"
+        st.session_state.conversations = {did: _new_conv_dict(did)}
+        st.session_state.active_conversation = did
 
 
-def get_messages() -> list:
+def get_messages() -> list[dict]:
     init_conversations()
-    cid = st.session_state.active_conversation
-    return st.session_state.conversations[cid]["messages"]
+    return st.session_state.conversations[st.session_state.active_conversation]["messages"]
 
 
-def set_messages(msgs: list) -> None:
+def set_messages(msgs: list[dict]) -> None:
     cid = st.session_state.active_conversation
     st.session_state.conversations[cid]["messages"] = msgs
+    st.session_state.conversations[cid]["updated"] = datetime.now().isoformat()
 
 
 def new_conversation() -> None:
     init_conversations()
     nid = f"c_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-    st.session_state.conversations[nid] = {
-        "id": nid, "title": "New chat",
-        "messages": [], "created": datetime.now().isoformat(),
-    }
+    st.session_state.conversations[nid] = _new_conv_dict(nid)
     st.session_state.active_conversation = nid
+    st.session_state.pending_images = []
 
 
 def delete_conversation(cid: str) -> None:
-    if cid in st.session_state.conversations:
-        del st.session_state.conversations[cid]
+    st.session_state.conversations.pop(cid, None)
     if st.session_state.active_conversation == cid:
         keys = list(st.session_state.conversations.keys())
         st.session_state.active_conversation = keys[0] if keys else None
@@ -888,15 +954,14 @@ def delete_conversation(cid: str) -> None:
 
 def auto_title(msg: str) -> str:
     try:
-        def _create(client):
-            return client.chat.completions.create(
+        def _c(cli):
+            return cli.chat.completions.create(
                 model=Cfg.DEFAULT_MODEL,
-                messages=[{"role": "user",
-                           "content": TITLE_PROMPT.format(message=msg[:300])}],
+                messages=[{"role": "user", "content": TITLE_PROMPT.format(message=msg[:300])}],
                 temperature=0.3, max_tokens=20,
             )
-        r = KeyManager.call(_create)
-        TokenTracker.add_from_usage(getattr(r, "usage", None))
+        r = KeyManager.call(_c)
+        TokenTracker.add_usage(getattr(r, "usage", None))
         t = r.choices[0].message.content.strip().strip('"').strip("'")
         return t[:40] if t else msg[:30]
     except Exception:
@@ -904,10 +969,10 @@ def auto_title(msg: str) -> str:
 
 
 # ============================================================
-# IMAGE GENERATION
+# EXTERNAL SERVICES
 # ============================================================
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_img_models() -> list:
+def fetch_img_models() -> list[str]:
     try:
         r = requests.get("https://image.pollinations.ai/models", timeout=10)
         r.raise_for_status()
@@ -919,7 +984,7 @@ def fetch_img_models() -> list:
         else:
             m = ["flux", "turbo"]
         m = [str(x) for x in m if x]
-        return m if m else ["flux", "turbo"]
+        return m or ["flux", "turbo"]
     except Exception:
         return ["flux", "turbo", "flux-realism", "flux-anime", "flux-3d"]
 
@@ -930,40 +995,33 @@ def generate_image(prompt: str, w: int = 1024, h: int = 1024, model: str = "flux
     if not prompt or not prompt.strip():
         raise TreatsError("Please enter a prompt.")
     url = f"https://image.pollinations.ai/prompt/{quote(prompt.strip())}"
-    p = {"width": w, "height": h, "model": model,
-         "seed": seed if seed is not None else -1,
-         "nologo": str(nologo).lower(), "enhance": str(enhance).lower()}
+    params = {"width": w, "height": h, "model": model,
+              "seed": seed if seed is not None else -1,
+              "nologo": str(nologo).lower(), "enhance": str(enhance).lower()}
     try:
-        r = requests.get(url, params=p, timeout=60)
+        r = requests.get(url, params=params, timeout=60)
         if r.status_code == 429:
-            raise TreatsError("Service is busy.")
+            raise TreatsError("Image service is busy. Try again in a moment.")
         r.raise_for_status()
         if not r.content or len(r.content) < 500:
-            raise TreatsError("Empty image.")
+            raise TreatsError("Empty image returned.")
         return r.content
     except requests.exceptions.Timeout:
-        raise TreatsError("Request timed out.")
+        raise TreatsError("Image request timed out.")
     except requests.exceptions.RequestException as e:
-        raise TreatsError(f"Failed: {e}")
+        raise TreatsError(f"Image request failed: {e}")
 
 
-# ============================================================
-# TTS
-# ============================================================
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_voices() -> dict:
+def fetch_voices() -> dict[str, list[str]]:
     try:
         import edge_tts
         async def _l():
             return await edge_tts.list_voices()
         v = asyncio.run(_l())
-        return {
-            "en": [x["ShortName"] for x in v if x["Locale"].startswith("en-")],
-            "ar": [x["ShortName"] for x in v if x["Locale"].startswith("ar-")],
-            "fr": [x["ShortName"] for x in v if x["Locale"].startswith("fr-")],
-            "es": [x["ShortName"] for x in v if x["Locale"].startswith("es-")],
-            "de": [x["ShortName"] for x in v if x["Locale"].startswith("de-")],
-        }
+        langs = {"en": "en-", "ar": "ar-", "fr": "fr-", "es": "es-", "de": "de-"}
+        return {code: [x["ShortName"] for x in v if x["Locale"].startswith(prefix)]
+                for code, prefix in langs.items()}
     except Exception:
         return {"en": [], "ar": [], "fr": [], "es": [], "de": []}
 
@@ -980,15 +1038,16 @@ async def _tts_async(text: str, voice: str, rate: str, pitch: str, volume: str) 
 
 LANG_CODE = {"English": "en", "Arabic": "ar", "French": "fr",
              "Spanish": "es", "German": "de"}
+LANG_LABEL = {v: k for k, v in LANG_CODE.items()}
 
 
-def tts_speak(text: str, language: str = "English", rate_val: float = 1.0,
-              pitch_val: int = 0, vol_val: int = 100) -> bytes:
-    lang_code = LANG_CODE.get(language, "en")
+def tts_speak(text: str, language: str = "English",
+              rate_val: float = 1.0, pitch_val: int = 0, vol_val: int = 100) -> bytes:
+    code = LANG_CODE.get(language, "en")
     voices = fetch_voices()
-    pool = voices.get(lang_code, [])
+    pool = voices.get(code) or []
     if not pool:
-        raise TreatsError(f"No voices for {language}")
+        raise TreatsError(f"No voices available for {language}.")
     voice = pool[0]
     rate = f"{'+' if rate_val >= 1 else ''}{int((rate_val - 1) * 100)}%"
     pitch = f"{'+' if pitch_val >= 0 else ''}{pitch_val}Hz"
@@ -997,22 +1056,22 @@ def tts_speak(text: str, language: str = "English", rate_val: float = 1.0,
 
 
 # ============================================================
-# ICONS
+# ICONS + TOOL HEADER
 # ============================================================
 ICONS = {
-    "chat": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>""",
-    "cv": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>""",
+    "chat":     """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>""",
+    "cv":       """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>""",
     "password": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>""",
-    "video": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>""",
-    "tts": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ec4899" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d='M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07'/></svg>""",
-    "photo": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>""",
+    "video":    """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>""",
+    "tts":      """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ec4899" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d='M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07'/></svg>""",
+    "photo":    """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>""",
 }
 
 
 def render_tool_header(key: str, title: str, sub: str) -> None:
     st.markdown(
         f'<div class="tool-header theme-{key}"><div class="icon">{ICONS[key]}</div>'
-        f'<div class="title-block"><h1>{title}</h1><p>{sub}</p></div></div>'
+        f'<div class="title-block"><h1>{esc(title)}</h1><p>{esc(sub)}</p></div></div>'
         f'<div style="height:26px"></div>',
         unsafe_allow_html=True,
     )
@@ -1039,7 +1098,6 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    # Display controls
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
         st.markdown('<div class="sidebar-label" style="padding-top:0;">Display</div>',
@@ -1071,34 +1129,30 @@ with st.sidebar:
             st.session_state.font_size = fsize
             st.rerun()
 
-    # ---------- USAGE ----------
+    # Usage panel
     st.markdown('<div class="sidebar-label">Usage</div>', unsafe_allow_html=True)
     used = TokenTracker.used()
     rem = TokenTracker.remaining()
     pct = min(100, int((used / Cfg.TOKEN_LIMIT) * 100))
-
-    if pct >= 90:
-        bar_color, cls, txt = "#ef4444", "bad", "Critical"
-    elif pct >= 70:
-        bar_color, cls, txt = "#f59e0b", "warn", "Warning"
-    else:
-        bar_color, cls, txt = "#10b981", "ok", "Active"
+    if pct >= 90:   bar_color, cls, txt = "#ef4444", "bad",  "Critical"
+    elif pct >= 70: bar_color, cls, txt = "#f59e0b", "warn", "Warning"
+    else:           bar_color, cls, txt = "#10b981", "ok",   "Active"
 
     st.markdown(
         f'<div class="panel">'
         f'<div class="row"><span>Status</span><span class="{cls}">{txt}</span></div>'
         f'<div class="row"><span>Used</span><span class="val">{used:,} / {Cfg.TOKEN_LIMIT:,}</span></div>'
         f'<div class="row"><span>Remaining</span><span class="val">{rem:,}</span></div>'
-        f'<div class="row"><span>Resets in</span><span class="val">{TokenTracker.time_until_reset_str()}</span></div>'
+        f'<div class="row"><span>Resets in</span><span class="val">{TokenTracker.reset_in()}</span></div>'
         f'<div class="bar-wrap"><div class="bar-fill" style="width:{pct}%;background:{bar_color};"></div></div>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
-    # ---------- API KEY ----------
+    # API key counter
     try:
-        total_keys = len(KeyManager.load_keys())
-        idx = KeyManager.current_index()
+        total_keys = len(KeyManager.load())
+        idx = KeyManager.index()
         st.markdown(
             f'<div class="panel">'
             f'<div class="row"><span>API Key</span>'
@@ -1106,16 +1160,20 @@ with st.sidebar:
             f'</div>',
             unsafe_allow_html=True,
         )
-    except Exception:
-        pass
+    except ConfigError:
+        st.markdown(
+            '<div class="panel"><div class="row"><span class="bad">'
+            'No API keys configured</span></div></div>',
+            unsafe_allow_html=True,
+        )
 
-    # ---------- TOOLS ----------
+    # Tools
     st.markdown('<div class="sidebar-label">Tools</div>', unsafe_allow_html=True)
     choice = st.radio("nav", list(TOOLS.keys()),
                       label_visibility="collapsed", key="nav")
     tool = TOOLS[choice]
 
-    # ---------- CHAT SIDEBAR ----------
+    # Chat-specific: conversations
     if tool == "chat":
         st.markdown('<div class="sidebar-label">Conversations</div>',
                     unsafe_allow_html=True)
@@ -1129,7 +1187,8 @@ with st.sidebar:
 
         items = list(st.session_state.conversations.items())
         if search:
-            items = [(c, v) for c, v in items if search.lower() in v["title"].lower()]
+            items = [(c, v) for c, v in items
+                     if search.lower() in v["title"].lower()]
 
         for cid, conv in items:
             active = cid == st.session_state.active_conversation
@@ -1138,13 +1197,14 @@ with st.sidebar:
             with col1:
                 if st.button(label, key=f"c_{cid}", use_container_width=True):
                     st.session_state.active_conversation = cid
+                    st.session_state.pending_images = []
                     st.rerun()
             with col2:
-                if st.button("✎", key=f"r_{cid}"):
+                if st.button("✎", key=f"r_{cid}", help="Rename"):
                     st.session_state.rename_conv = cid
                     st.rerun()
             with col3:
-                if st.button("×", key=f"d_{cid}"):
+                if st.button("×", key=f"d_{cid}", help="Delete"):
                     delete_conversation(cid)
                     st.rerun()
 
@@ -1171,69 +1231,68 @@ with st.sidebar:
                 with zipfile.ZipFile(buf, "w") as z:
                     for c, v in st.session_state.conversations.items():
                         safe = "".join(ch for ch in v["title"]
-                                       if ch.isalnum() or ch in " -_")[:30]
-                        z.writestr(
-                            f"{safe or c}.json",
-                            json.dumps(v["messages"], ensure_ascii=False,
-                                       indent=2, default=str),
-                        )
+                                       if ch.isalnum() or ch in " -_")[:30] or c
+                        z.writestr(f"{safe}.json",
+                                   json.dumps(v["messages"], ensure_ascii=False,
+                                              indent=2, default=str))
                 st.download_button(
                     "⬇️ Download ZIP", buf.getvalue(),
                     f"treats_all_{datetime.now():%Y%m%d}.zip",
                     "application/zip", use_container_width=True,
                 )
 
-    # ---------- MODEL ----------
+    # Model selector
     st.markdown('<div class="sidebar-label">AI Model</div>', unsafe_allow_html=True)
-    model = st.selectbox("m", Cfg.GROQ_MODELS, key="mdl",
-                         label_visibility="collapsed")
+    model = st.selectbox("m", Cfg.GROQ_MODELS, key="mdl", label_visibility="collapsed")
 
     st.markdown(
-        '<div class="sidebar-footer"><strong>Treats v4.0</strong><br>'
+        '<div class="sidebar-footer"><strong>Treats v5.0</strong><br>'
         'Powered by Groq<br><br>'
         '<span class="kbd">Enter</span> send · '
-        '<span class="kbd">Shift+Enter</span> new line</div>',
+        '<span class="kbd">Shift+Enter</span> newline<br>'
+        '<span class="kbd">⌘K</span> new chat · '
+        '<span class="kbd">⌘/</span> focus</div>',
         unsafe_allow_html=True,
     )
 
 
 # ============================================================
-# CHAT
+# CHAT — MESSAGE RENDERING
 # ============================================================
-PROMPTS = [
-    ("Explain", "Explain {topic} in simple terms."),
-    ("Summarize", "Summarize in 5 bullets:\n\n{text}"),
-    ("Translate", "Translate to {language}:\n\n{text}"),
-    ("Email", "Write a professional email about {topic}."),
-    ("Code", "Write Python code that {task}."),
-    ("Brainstorm", "Give me 10 ideas about {topic}."),
-]
-
-
-def render_message_actions(m: dict, i: int, msgs: list) -> None:
+def render_message_actions(m: dict, i: int, msgs: list[dict]) -> None:
     c1, _ = st.columns([1, 8])
     with c1:
         with st.popover("☰"):
             if st.button("📋 Copy", key=f"cp_{i}", use_container_width=True):
-                copy_to_clipboard(m.get("content", ""), f"cp_{i}")
+                copy_to_clipboard(m.get("content", ""))
                 st.toast("Copied!")
-            if i == len(msgs) - 1:
-                if st.button("🔄 Retry", key=f"rg_{i}", use_container_width=True):
+
+            if m["role"] == "user":
+                if st.button("✏️ Edit", key=f"ed_{i}", use_container_width=True):
+                    st.session_state.editing_msg = i
+                    st.rerun()
+
+            if m["role"] == "assistant":
+                if st.button("🔄 Regenerate", key=f"rg_{i}", use_container_width=True):
+                    # Remove this assistant message; keep preceding context
                     set_messages(msgs[:i])
                     st.rerun()
+
             if st.button("🗑 Delete", key=f"dl_{i}", use_container_width=True):
                 set_messages(msgs[:i] + msgs[i + 1:])
                 st.rerun()
 
 
-def render_message(m: dict, i: int, msgs: list) -> None:
+def render_message(m: dict, i: int, msgs: list[dict]) -> None:
     with st.chat_message(m["role"]):
+        # Show attached images
+        for url in m.get("images", []):
+            try:
+                st.image(url, width=280)
+            except Exception:
+                pass
+
         mtype = m.get("type", "text")
-
-        if m.get("images"):
-            for img in m["images"]:
-                st.image(img, width=280)
-
         if mtype == "audio":
             st.markdown(m.get("content", ""))
             if "audio_bytes" in m:
@@ -1252,157 +1311,231 @@ def render_message(m: dict, i: int, msgs: list) -> None:
             if m.get("content"):
                 st.markdown(m["content"])
 
-        if m["role"] == "assistant":
+        # Inline edit mode for user messages
+        if m["role"] == "user" and st.session_state.editing_msg == i:
+            new_text = st.text_area("Edit message", value=m.get("content", ""),
+                                    key=f"edit_ta_{i}", height=100)
+            ec1, ec2 = st.columns([1, 1])
+            with ec1:
+                if st.button("Save & regenerate", key=f"edit_save_{i}",
+                             type="primary", use_container_width=True):
+                    msgs[i]["content"] = new_text
+                    set_messages(msgs[:i + 1])
+                    st.session_state.editing_msg = None
+                    st.rerun()
+            with ec2:
+                if st.button("Cancel", key=f"edit_cancel_{i}",
+                             use_container_width=True):
+                    st.session_state.editing_msg = None
+                    st.rerun()
+
+        # Metadata + actions
+        meta = fmt_time(m.get("ts", ""))
+        if meta:
+            st.markdown(f'<div class="msg-meta">{esc(meta)}</div>',
+                        unsafe_allow_html=True)
+
+        if not (m["role"] == "user" and st.session_state.editing_msg == i):
             render_message_actions(m, i, msgs)
 
 
-def handle_tool_call(tc: Any, msgs: list) -> None:
-    fn = tc.function.name
+# ============================================================
+# CHAT — TOOL HANDLING
+# ============================================================
+def handle_tool_call(tc: Any, msgs: list[dict]) -> None:
+    name = tc.function.name
     try:
         args = json.loads(tc.function.arguments)
     except Exception:
         args = {}
 
-    if fn == "generate_speech":
-        text = args.get("text", "")
-        lang = args.get("language", "English")
+    if name == "generate_speech":
+        text = (args.get("text") or "").strip()
+        lang = args.get("language") or "English"
         with st.chat_message("assistant"):
-            with st.spinner(f"Generating {lang} speech..."):
+            with st.spinner(f"Generating {lang} speech…"):
                 try:
                     audio_bytes = tts_speak(text, lang)
                     msgs.append({
                         "role": "assistant",
                         "content": f"🔊 **Audio** ({lang}):\n\n> {text}",
-                        "type": "audio", "audio_bytes": audio_bytes,
+                        "type": "audio",
+                        "audio_bytes": audio_bytes,
                         "ts": datetime.now().isoformat(),
                     })
-                    set_messages(msgs); st.rerun()
                 except Exception as e:
                     msgs.append({
                         "role": "assistant",
                         "content": f"❌ TTS failed: {e}",
                         "ts": datetime.now().isoformat(),
                     })
-                    set_messages(msgs); st.rerun()
+        set_messages(msgs)
+        st.rerun()
 
-    elif fn == "generate_image":
-        prompt_txt = args.get("prompt", "")
+    elif name == "generate_image":
+        prompt_txt = (args.get("prompt") or "").strip()
         with st.chat_message("assistant"):
-            with st.spinner("Generating image..."):
+            with st.spinner("Generating image…"):
                 try:
                     img_bytes = generate_image(prompt_txt, 1024, 1024, "flux")
                     msgs.append({
                         "role": "assistant",
                         "content": f"🎨 **Image:**\n\n> {prompt_txt}",
-                        "type": "image", "image_bytes": img_bytes,
+                        "type": "image",
+                        "image_bytes": img_bytes,
                         "ts": datetime.now().isoformat(),
                     })
-                    set_messages(msgs); st.rerun()
                 except Exception as e:
                     msgs.append({
                         "role": "assistant",
                         "content": f"❌ Image failed: {e}",
                         "ts": datetime.now().isoformat(),
                     })
-                    set_messages(msgs); st.rerun()
+        set_messages(msgs)
+        st.rerun()
 
 
-def stream_chat_response(hist: list, model_name: str, msgs: list) -> None:
-    def _create_stream(cli):
+# ============================================================
+# CHAT — STREAMING
+# ============================================================
+def stream_chat_response(hist: list[dict], model_name: str, msgs: list[dict]) -> None:
+    def _stream(cli):
         return cli.chat.completions.create(
             model=model_name, messages=hist, temperature=0.7, stream=True,
         )
-    stream = KeyManager.call(_create_stream)
 
     with st.chat_message("assistant"):
         ph = st.empty()
         full = ""
-        for ch in stream:
-            if ch.choices and ch.choices[0].delta.content:
-                full += ch.choices[0].delta.content
-                ph.markdown(full + "▌")
+        try:
+            for chunk in KeyManager.stream(_stream):
+                delta = None
+                try:
+                    delta = chunk.choices[0].delta.content
+                except Exception:
+                    delta = None
+                if delta:
+                    full += delta
+                    ph.markdown(full + "▌")
+        except QuotaError as e:
+            st.error(str(e))
+            return
+        except Exception as e:
+            if not full:
+                st.error(f"Streaming failed: {e}")
+                return
         ph.markdown(full)
 
-    est = sum(message_tokens(m) for m in hist) + len(full) // 4
+    # Token accounting: real usage when available, else estimate
+    est = sum(msg_tokens(m) for m in hist) + len(full) // 4
     TokenTracker.add(est)
 
     msgs.append({
-        "role": "assistant", "content": full,
+        "role": "assistant",
+        "content": full,
         "ts": datetime.now().isoformat(),
     })
-    set_messages(msgs); st.rerun()
+    set_messages(msgs)
+    st.rerun()
 
 
-def upload_image() -> Optional[str]:
-    """يعرض زر رفع صورة ويرجع data URL إن وُجدت."""
-    with st.expander("📎 Attach an image (optional)", expanded=False):
+# ============================================================
+# CHAT — IMAGE ATTACHMENT
+# ============================================================
+def render_attachments() -> None:
+    """Show pending images with remove button + uploader."""
+    with st.expander(
+        f"📎 Attachments ({len(st.session_state.pending_images)})"
+        if st.session_state.pending_images else "📎 Attach an image",
+        expanded=bool(st.session_state.pending_images),
+    ):
         up = st.file_uploader(
-            "Choose image",
-            type=Cfg.SUPPORTED_IMGS,
-            key=f"img_up_{st.session_state.active_conversation}",
-            label_visibility="collapsed",
+            "Choose image", type=Cfg.SUPPORTED_IMGS,
+            key=f"up_{st.session_state.active_conversation}",
+            label_visibility="collapsed", accept_multiple_files=True,
         )
-        if up is not None:
-            try:
-                raw = up.getvalue()
-                b64 = base64.b64encode(raw).decode()
-                mime = up.type or "image/png"
-                data_url = f"data:{mime};base64,{b64}"
-                st.image(raw, caption=f"📎 {up.name} — will attach to next message",
-                         width=260)
-                return data_url
-            except Exception as e:
-                st.error(f"Could not read image: {e}")
-    return None
+        if up:
+            for f in up:
+                try:
+                    b64 = base64.b64encode(f.getvalue()).decode()
+                    mime = f.type or "image/png"
+                    data_url = f"data:{mime};base64,{b64}"
+                    if data_url not in st.session_state.pending_images:
+                        st.session_state.pending_images.append(data_url)
+                except Exception as e:
+                    st.error(f"Could not read {f.name}: {e}")
+
+        if st.session_state.pending_images:
+            cols = st.columns(min(3, len(st.session_state.pending_images)))
+            for idx, url in enumerate(list(st.session_state.pending_images)):
+                with cols[idx % len(cols)]:
+                    st.image(url, use_container_width=True)
+                    if st.button("Remove", key=f"rm_{idx}", use_container_width=True):
+                        st.session_state.pending_images.pop(idx)
+                        st.rerun()
 
 
+# ============================================================
+# CHAT — MAIN RENDER
+# ============================================================
 def render_chat() -> None:
     msgs = get_messages()
 
-    # ---------- Limit reached ----------
     if not TokenTracker.can_send():
         st.markdown(
             f'<div class="limit-banner"><strong>Daily limit reached</strong><br>'
             f'You used {TokenTracker.used():,} / {Cfg.TOKEN_LIMIT:,} tokens.<br>'
-            f'Resets in {TokenTracker.time_until_reset_str()}.</div>',
+            f'Resets in {TokenTracker.reset_in()}.</div>',
             unsafe_allow_html=True,
         )
         for i, m in enumerate(msgs):
             render_message(m, i, msgs)
         return
 
-    # ---------- Hero ----------
     if not msgs:
         st.markdown(
             f'<div class="treats-hero"><img src="{LOGO_URI}" class="hero-logo">'
-            f'<div class="greeting">{get_greeting()}. How can I help you?</div></div>',
+            f'<div class="greeting">{esc(greeting())}. How can I help you?</div></div>',
             unsafe_allow_html=True,
         )
         with st.expander("💡 Prompt Library"):
             cols = st.columns(3)
-            for i, (label, template) in enumerate(PROMPTS):
+            for i, (label, template) in enumerate(PROMPTS_LIB):
                 with cols[i % 3]:
                     if st.button(label, key=f"p_{i}", use_container_width=True):
-                        st.session_state.pl_template = template
+                        st.session_state.prompt_template = template
                         st.rerun()
 
-    # ---------- Render messages ----------
     for i, m in enumerate(msgs):
         render_message(m, i, msgs)
 
-    # ---------- Image upload (always available) ----------
-    uploaded_img_data = upload_image()
+    # Attach images
+    render_attachments()
 
-    # ---------- Chat input ----------
-    prompt = st.chat_input("Message Treats...")
+    # Prefill from prompt template
+    prefill = st.session_state.prompt_template or ""
+    if prefill:
+        st.session_state.prompt_template = None
+
+    # Chat input
+    prompt = st.chat_input(
+        "Message Treats…",
+        # Note: Streamlit doesn't support default value in chat_input;
+        # instead we surface template as info block.
+    )
+
+    if prefill and not prompt:
+        st.info(f"💡 Template: `{prefill}` — paste or edit before sending.")
+
     if prompt:
         if not TokenTracker.can_send():
-            st.error("Limit reached.")
+            st.error("Daily limit reached.")
             st.stop()
         new_msg = {"role": "user", "content": prompt,
                    "ts": datetime.now().isoformat()}
-        if uploaded_img_data:
-            new_msg["images"] = [uploaded_img_data]
+        if st.session_state.pending_images:
+            new_msg["images"] = list(st.session_state.pending_images)
+            st.session_state.pending_images = []
         msgs.append(new_msg)
         set_messages(msgs)
 
@@ -1411,53 +1544,63 @@ def render_chat() -> None:
             st.session_state.conversations[cid]["title"] = auto_title(prompt)
         st.rerun()
 
-    # ---------- Send to Groq ----------
+    # Auto-respond if last message is user
     if msgs and msgs[-1]["role"] == "user":
-        try:
-            clean = [build_api_message(m) for m in msgs
-                     if (m.get("content") or m.get("images"))]
-            has_images = any(m.get("images") for m in msgs)
-            is_vision = has_images
+        respond_to_last_user(msgs, model)
 
-            active_model = Cfg.VISION_MODEL if is_vision else model
-            sys_prompt = SYS_VISION if is_vision else SYS_CHAT
-            full = [{"role": "system", "content": sys_prompt}] + clean
-            hist = trim_history(full)
 
-            use_tools = not is_vision
+def respond_to_last_user(msgs: list[dict], model_name: str) -> None:
+    try:
+        # Detect vision mode based on last user message ONLY (bugfix)
+        last_user = next((m for m in reversed(msgs) if m["role"] == "user"), None)
+        is_vision = bool(last_user and last_user.get("images"))
 
-            if use_tools:
-                def _create_with_tools(cli):
-                    return cli.chat.completions.create(
-                        model=active_model, messages=hist, temperature=0.7,
-                        tools=TOOLS_SCHEMA, tool_choice="auto",
-                    )
-                response = KeyManager.call(_create_with_tools)
-                TokenTracker.add_from_usage(getattr(response, "usage", None))
+        clean = [build_api_message(m) for m in msgs
+                 if (m.get("content") or m.get("images"))]
+        sys_prompt = SYS_VISION if is_vision else SYS_CHAT
+        full = [{"role": "system", "content": sys_prompt}] + clean
+        hist = trim_history(full)
+        active_model = Cfg.VISION_MODEL if is_vision else model_name
 
-                msg_obj = response.choices[0].message
-                if getattr(msg_obj, "tool_calls", None):
-                    for tc in msg_obj.tool_calls:
+        # Non-vision: try tool calling first
+        if not is_vision:
+            def _tools(cli):
+                return cli.chat.completions.create(
+                    model=active_model, messages=hist, temperature=0.7,
+                    tools=TOOLS_SCHEMA, tool_choice="auto",
+                )
+            try:
+                response = KeyManager.call(_tools)
+                TokenTracker.add_usage(getattr(response, "usage", None))
+                tool_calls = getattr(response.choices[0].message, "tool_calls", None)
+                if tool_calls:
+                    for tc in tool_calls:
                         handle_tool_call(tc, msgs)
                     return
+            except QuotaError:
+                raise
+            except Exception as e:
+                log.warning("Tool call failed, falling back to stream: %s", e)
 
-            stream_chat_response(hist, active_model, msgs)
+        stream_chat_response(hist, active_model, msgs)
 
-        except TreatsError as e:
-            st.error(str(e))
-        except Exception as e:
-            try:
-                stream_chat_response(hist, active_model, msgs)
-            except Exception as e2:
-                st.error(f"Error: {e2}")
+    except ConfigError as e:
+        st.error(f"Configuration error: {e}")
+    except QuotaError as e:
+        st.error(f"Quota error: {e}")
+    except TreatsError as e:
+        st.error(str(e))
+    except Exception as e:
+        log.exception("Unexpected error")
+        st.error(f"Unexpected error: {e}")
 
 
 # ============================================================
-# CV BUILDER
+# TOOLS
 # ============================================================
 CV_TEMPLATES = {
-    "Modern": "modern two-column with colored header",
-    "Classic": "traditional professional",
+    "Modern":   "modern two-column with colored header",
+    "Classic":  "traditional professional",
     "Creative": "creative with unique styling",
 }
 
@@ -1485,41 +1628,38 @@ def render_cv() -> None:
 
     if submitted:
         if not name or not role:
-            st.warning("Name and role required.")
+            st.warning("Name and role are required.")
             return
         try:
             p = (f"Write a CV in {lang}, {tone} tone. Style: {CV_TEMPLATES[tpl]}.\n"
-                 f"Name:{name}\nRole:{role}\nExperience:{exp}\n"
-                 f"Education:{edu}\nSkills:{skills}\nMarkdown.")
-            with st.spinner("Generating..."):
-                def _create(cli):
+                 f"Name: {name}\nRole: {role}\nExperience: {exp}\n"
+                 f"Education: {edu}\nSkills: {skills}\nReturn Markdown.")
+            with st.spinner("Generating…"):
+                def _c(cli):
                     return cli.chat.completions.create(
                         model=Cfg.HEAVY_MODEL,
                         messages=[{"role": "user", "content": p}],
                         temperature=0.6,
                     )
-                r = KeyManager.call(_create)
-
-            TokenTracker.add_from_usage(getattr(r, "usage", None))
+                r = KeyManager.call(_c)
+            TokenTracker.add_usage(getattr(r, "usage", None))
             txt = r.choices[0].message.content
             st.markdown("---")
             st.markdown(txt)
             c1, c2 = st.columns(2)
             with c1:
-                st.download_button("⬇️ Markdown", txt, "cv.md",
-                                   "text/markdown", use_container_width=True)
+                st.download_button("⬇️ Markdown", txt, "cv.md", "text/markdown",
+                                   use_container_width=True)
             with c2:
-                st.download_button("⬇️ Text", txt, "cv.txt",
-                                   "text/plain", use_container_width=True)
+                st.download_button("⬇️ Text", txt, "cv.txt", "text/plain",
+                                   use_container_width=True)
+        except TreatsError as e:
+            st.error(str(e))
         except Exception as e:
             st.error(f"Error: {e}")
 
 
-# ============================================================
-# PASSWORD GENERATOR
-# ============================================================
 def render_password() -> None:
-    import string
     render_tool_header("password", "Password Generator", "Create strong, secure passwords")
 
     c1, c2, c3 = st.columns(3)
@@ -1530,22 +1670,17 @@ def render_password() -> None:
     with c3:
         use_symbols = st.checkbox("Symbols", value=True)
 
-    chars = string.ascii_letters
-    if use_numbers:
-        chars += string.digits
-    if use_symbols:
-        chars += "!@#$%^&*()-_=+"
+    alphabet = string.ascii_letters
+    if use_numbers: alphabet += string.digits
+    if use_symbols: alphabet += "!@#$%^&*()-_=+"
 
     if st.button("🎲 Generate", type="primary", use_container_width=True):
-        pwd = "".join(random.choice(chars) for _ in range(length))
+        pwd = "".join(random.choice(alphabet) for _ in range(length))
         st.code(pwd, language=None)
         st.download_button("⬇️ Download", pwd, "password.txt",
                            use_container_width=True)
 
 
-# ============================================================
-# VIDEO SCRIPT
-# ============================================================
 def render_video() -> None:
     render_tool_header("video", "Video Script", "Generate scene-by-scene storyboards")
     if not TokenTracker.can_send():
@@ -1572,32 +1707,26 @@ def render_video() -> None:
             st.warning("Enter a topic.")
             return
         try:
-            p = (f"Video script in {lang} for {plat}. Topic:{topic}. "
-                 f"Duration:{dur}. Style:{sty}. Storyboard.")
-            with st.spinner("Generating..."):
-                def _create(cli):
+            p = (f"Video script in {lang} for {plat}. Topic: {topic}. "
+                 f"Duration: {dur}. Style: {sty}. Storyboard.")
+            with st.spinner("Generating…"):
+                def _c(cli):
                     return cli.chat.completions.create(
                         model=Cfg.HEAVY_MODEL,
                         messages=[{"role": "user", "content": p}],
                         temperature=0.7,
                     )
-                r = KeyManager.call(_create)
-
-            TokenTracker.add_from_usage(getattr(r, "usage", None))
+                r = KeyManager.call(_c)
+            TokenTracker.add_usage(getattr(r, "usage", None))
             txt = r.choices[0].message.content
             st.markdown("---")
             st.markdown(txt)
-            st.download_button("⬇️ Markdown", txt, "script.md",
-                               "text/markdown", use_container_width=True)
+            st.download_button("⬇️ Markdown", txt, "script.md", "text/markdown",
+                               use_container_width=True)
+        except TreatsError as e:
+            st.error(str(e))
         except Exception as e:
             st.error(f"Error: {e}")
-
-
-# ============================================================
-# TTS
-# ============================================================
-LANG_LABEL = {"en": "English", "ar": "Arabic", "fr": "French",
-              "es": "Spanish", "de": "German"}
 
 
 def render_tts() -> None:
@@ -1611,51 +1740,45 @@ def render_tts() -> None:
     lc = st.radio("Language", avail, format_func=lambda x: LANG_LABEL.get(x, x),
                   horizontal=True)
     voice = st.selectbox("Voice", voices[lc], key="tv")
-    text = st.text_area("Text", height=160, placeholder="Enter text...")
+    text = st.text_area("Text", height=160, placeholder="Enter text…")
 
     c1, c2, c3 = st.columns(3)
-    with c1: rate_val = st.slider("Rate", 0.5, 2.0, 1.0, 0.1)
+    with c1: rate_val  = st.slider("Rate", 0.5, 2.0, 1.0, 0.1)
     with c2: pitch_val = st.slider("Pitch (Hz)", -50, 50, 0, 5)
-    with c3: vol_val = st.slider("Volume", 0, 100, 100, 5)
+    with c3: vol_val   = st.slider("Volume", 0, 100, 100, 5)
 
-    rate = f"{'+' if rate_val >= 1 else ''}{int((rate_val - 1) * 100)}%"
+    rate  = f"{'+' if rate_val >= 1 else ''}{int((rate_val - 1) * 100)}%"
     pitch = f"{'+' if pitch_val >= 0 else ''}{pitch_val}Hz"
-    vol = f"+{vol_val}%"
+    vol   = f"+{vol_val}%"
 
     if st.button("🔊 Generate Audio", type="primary", use_container_width=True):
         if not text.strip():
             st.warning("Enter text.")
             return
         try:
-            with st.spinner("Generating..."):
+            with st.spinner("Generating…"):
                 audio = asyncio.run(_tts_async(text, voice, rate, pitch, vol))
             st.audio(audio, format="audio/mp3")
-            st.download_button("⬇️ MP3", audio, "tts.mp3",
-                               "audio/mpeg", use_container_width=True)
+            st.download_button("⬇️ MP3", audio, "tts.mp3", "audio/mpeg",
+                               use_container_width=True)
         except Exception as e:
             st.error(f"Failed: {e}")
 
 
-# ============================================================
-# IMAGE GENERATOR
-# ============================================================
 def render_photo() -> None:
     render_tool_header("photo", "Image Generator", "Create images from text descriptions")
-    with st.spinner("Loading models..."):
+    with st.spinner("Loading models…"):
         models = fetch_img_models()
 
     prompt = st.text_area("Prompt",
                           placeholder="A cat in Paris, cinematic lighting, 4K",
                           height=110)
     c1, c2, c3 = st.columns(3)
-    with c1: model = st.selectbox("Model", models, key="pm")
+    with c1: model   = st.selectbox("Model", models, key="pm")
     with c2:
-        aspect = st.selectbox(
-            "Aspect",
-            ["1:1 (1024×1024)", "16:9 (1344×768)",
-             "9:16 (768×1344)", "4:3 (1152×896)"],
-            key="pa",
-        )
+        aspect = st.selectbox("Aspect",
+                              ["1:1 (1024×1024)", "16:9 (1344×768)",
+                               "9:16 (768×1344)", "4:3 (1152×896)"], key="pa")
     with c3: enhance = st.checkbox("Auto-enhance", value=True, key="pe")
 
     sizes = {
@@ -1683,7 +1806,7 @@ def render_photo() -> None:
             st.warning("Enter a prompt.")
             return
         try:
-            with st.spinner("Generating..."):
+            with st.spinner("Generating…"):
                 img = generate_image(prompt, w, h, model, seed, enhance)
             st.session_state.li = img
             st.session_state.lp = prompt
@@ -1709,12 +1832,11 @@ def render_photo() -> None:
         with c2:
             if st.button("🔄 Regenerate", use_container_width=True):
                 try:
-                    with st.spinner("Regenerating..."):
-                        img = generate_image(
+                    with st.spinner("Regenerating…"):
+                        st.session_state.li = generate_image(
                             st.session_state.lp, w, h, model,
                             random.randint(1, 999999), enhance,
                         )
-                    st.session_state.li = img
                     st.rerun()
                 except TreatsError as e:
                     st.error(str(e))
@@ -1731,15 +1853,13 @@ def render_photo() -> None:
 # ============================================================
 # ROUTER
 # ============================================================
-if tool == "chat":
-    render_chat()
-elif tool == "cv":
-    render_cv()
-elif tool == "password":
-    render_password()
-elif tool == "video":
-    render_video()
-elif tool == "tts":
-    render_tts()
-elif tool == "photo":
-    render_photo()
+ROUTES: dict[str, Callable[[], None]] = {
+    "chat": render_chat,
+    "cv": render_cv,
+    "password": render_password,
+    "video": render_video,
+    "tts": render_tts,
+    "photo": render_photo,
+}
+
+ROUTES[tool]()
